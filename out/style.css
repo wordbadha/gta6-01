@@ -1,0 +1,85 @@
+/* Palmetto Heat — page styling. Dark, sun-bleached, game-like. */
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #0b0e14;
+  color: #f2ede3;
+  font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif;
+}
+body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#wrap {
+  position: relative;
+  width: 1280px;
+  max-width: 100vw;
+  aspect-ratio: 16 / 9;
+}
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #1d3a2a;
+  cursor: crosshair;
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 12, 20, 0.55);
+  text-align: center;
+  z-index: 5;
+}
+.overlay.hidden { display: none; }
+.panel {
+  max-width: 640px;
+  padding: 34px 40px 28px;
+  background: rgba(10, 14, 22, 0.88);
+  border: 1px solid rgba(255, 176, 66, 0.45);
+  border-radius: 10px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+.panel.small { max-width: 460px; }
+.kicker {
+  margin: 0 0 6px;
+  color: #ffb042;
+  font-size: 13px;
+  letter-spacing: 4px;
+  font-weight: bold;
+}
+h1 {
+  margin: 0 0 10px;
+  font-size: 54px;
+  line-height: 1;
+  letter-spacing: 3px;
+  color: #ff5a3c;
+  text-shadow: 0 3px 0 #7a1d0d, 0 6px 18px rgba(0, 0, 0, 0.7);
+}
+h1.red { color: #ff2e4d; text-shadow: 0 3px 0 #5c0a18, 0 6px 18px rgba(0, 0, 0, 0.7); }
+.tag { margin: 0 0 12px; font-size: 16px; color: #ffd9a0; }
+.story { margin: 0 0 18px; font-size: 15px; line-height: 1.55; color: #e8e2d4; }
+.buttons { display: flex; gap: 12px; justify-content: center; margin: 0 0 16px; }
+button {
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 12px 26px;
+  border-radius: 6px;
+  border: 1px solid #ffb042;
+  background: #ff5a3c;
+  color: #fff7ee;
+  cursor: pointer;
+}
+button:hover { background: #ff6f52; }
+button:disabled { opacity: 0.45; cursor: default; }
+#btn-continue { background: #1f6f5c; border-color: #57c9a8; }
+#btn-continue:hover { background: #268a72; }
+.controls { margin: 0 0 10px; font-size: 13px; line-height: 1.6; color: #b9c0cc; }
+.fine { margin: 0; font-size: 12px; color: #7d8594; }
