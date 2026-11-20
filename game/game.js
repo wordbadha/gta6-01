@@ -1,1522 +1,1133 @@
-/* ============================================================================
-   PALMETTO HEAT — an original top-down open-world crime game.
-   Set in the fictional Palmetto City. Jax "Reef" Carter runs six jobs for
-   Lena "Nova" Diaz while the Palmetto PD gives chase. Every character,
-   place, vehicle, story beat, sound and line of art here is original.
-   One plain script, no modules, no network, no external files.
-   ============================================================================ */
+// Palmetto Heat — a 2D top-down open-world crime game set in Palmetto City.
+// Original city, characters, vehicles and story. No network, no libraries:
+// one plain script, canvas rendering, WebAudio synthesis, localStorage saves.
 
 (function () {
-"use strict";
+  "use strict";
 
-/* ---------------- small helpers ---------------- */
-function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
-function dist(x1, y1, x2, y2) { var dx = x2 - x1, dy = y2 - y1; return Math.sqrt(dx * dx + dy * dy); }
-function angTo(x1, y1, x2, y2) { return Math.atan2(y2 - y1, x2 - x1); }
-function turnToward(a, target, maxStep) {
-  var d = target - a;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  if (d > maxStep) d = maxStep;
-  if (d < -maxStep) d = -maxStep;
-  return a + d;
-}
-function mulberry32(seed) {
-  var a = seed | 0;
-  return function () {
-    a = (a + 0x6D2B79F5) | 0;
-    var t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-var rng = mulberry32(20261118);
-function pick(arr) { return arr[Math.floor(rng() * arr.length)]; }
-function irnd(lo, hi) { return lo + Math.floor(rng() * (hi - lo + 1)); }
+  // ---------- world constants ----------
+  var WORLD_W = 2400, WORLD_H = 2400;
+  var ROAD_XS = [160, 420, 680, 940, 1200, 1460, 1720, 1980, 2240];
+  var ROAD_YS = [160, 420, 680, 940, 1200, 1460, 1720, 1980, 2240];
+  var ROAD_HALF = 45;
+  var SAVE_KEY = "palmetto-heat-save-v1";
+  var HOSPITAL = { x: 300, y: 900 };
+  var WALK_SPEED = 170, RUN_SPEED = 265;
+  var CAR_TOP = 340, CAR_ACCEL = 250, CAR_BRAKE = 340;
 
-/* ---------------- world constants ---------------- */
-var WORLD_W = 2400, WORLD_H = 2400;
-var VIEW_W = 1280, VIEW_H = 720;
-var ROADS_X = [290, 550, 810, 1070, 1330, 1590, 1850, 2110];
-var ROADS_Y = [420, 680, 900, 1200, 1460, 1750, 1980];
-var ROAD_HALF = 45;
-var BLOCKS_X = [[0, 245], [335, 505], [595, 765], [855, 1025], [1115, 1285], [1375, 1545], [1635, 1805], [1895, 2065], [2155, 2400]];
-var BLOCKS_Y = [[0, 375], [465, 635], [725, 855], [945, 1155], [1245, 1415], [1505, 1705], [1795, 1935], [2025, 2400]];
-
-var PLACES = {
-  motel:     { x: 290,  y: 420,  label: "Sunset Motel" },
-  garage:    { x: 550,  y: 420,  label: "Reef Garage" },
-  gunshop:   { x: 1070, y: 420,  label: "Ironclad Guns" },
-  spray:     { x: 1590, y: 420,  label: "Pay 'n Spray" },
-  docks:     { x: 290,  y: 1980, label: "Palmetto Docks" },
-  pawn:      { x: 550,  y: 1200, label: "Golden Palm Pawn" },
-  stadium:   { x: 2100, y: 1750, label: "Palmetto Bowl" },
-  safehouse: { x: 2110, y: 680,  label: "Safehouse" },
-  bank:      { x: 1330, y: 1200, label: "First Palmetto Bank" },
-  park:      { x: 1070, y: 810,  label: "Hibiscus Park" },
-  mall:      { x: 1590, y: 1980, label: "Palmetto Mall" },
-  hospital:  { x: 300,  y: 900,  label: "Palmetto General" }
-};
-var HOSPITAL = { x: 300, y: 900 };
-var SPAWN = { x: 160, y: 420 };
-
-var MODELS = [
-  { name: "Coral Sedan",       color: "#e8546a", top: 300 },
-  { name: "Bay Taxi",          color: "#f2c230", top: 300 },
-  { name: "Palm Van",          color: "#7fb069", top: 260 },
-  { name: "Gator Truck",       color: "#5b7fa6", top: 260 },
-  { name: "Sunset Coupe",      color: "#ff7a3c", top: 330 },
-  { name: "Hibiscus Hatchback",color: "#c77dff", top: 300 },
-  { name: "Marlin Pickup",     color: "#3fa7a0", top: 280 },
-  { name: "Palmetto GT",       color: "#ff2e4d", top: 350 }
-];
-function modelByName(name) {
-  for (var i = 0; i < MODELS.length; i++) if (MODELS[i].name === name) return MODELS[i];
-  return MODELS[0];
-}
-
-var MISSIONS = [
-  { id: "m1", title: "Welcome to Palmetto", desc: "Meet Lena at the Sunset Motel, steal a parked car, bring it to Reef Garage.", payout: 300 },
-  { id: "m2", title: "Dockside Run", desc: "Walk to the docks, then drive to the Golden Palm Pawn.", payout: 500 },
-  { id: "m3", title: "The Palmetto GT", desc: "Go to the Palmetto Bowl, steal the GT, drive it to Reef Garage.", payout: 700 },
-  { id: "m4", title: "Lay Low", desc: "Lose the heat, then walk to the safehouse.", payout: 500 },
-  { id: "m5", title: "Park and Mall", desc: "Walk through Hibiscus Park, then drive to the Palmetto Mall.", payout: 1000 },
-  { id: "m6", title: "First Palmetto Bank", desc: "Walk into the bank, hold the lobby, then escape to the safehouse.", payout: 2500 }
-];
-
-/* ---------------- state ---------------- */
-var G = {
-  mode: "menu",
-  time: 0,
-  clock: 10.5,
-  player: { x: SPAWN.x, y: SPAWN.y, onFoot: true, car: null, heading: 0 },
-  cars: [],
-  peds: [],
-  cops: [],
-  copCars: [],
-  packages: [],
-  particles: [],
-  tracers: [],
-  buildings: [],
-  landmarks: [],
-  missionIdx: 0,
-  missionStep: 0,
-  cash: 250,
-  wanted: 0,
-  health: 100,
-  ammo: 24,
-  weapon: 2,
-  carsStolen: 0,
-  packagesGot: 0,
-  taxi: null,
-  keys: {},
-  mouseDown: false,
-  aimX: VIEW_W / 2 + 200,
-  aimY: VIEW_H / 2 - 100,
-  cam: { x: SPAWN.x, y: SPAWN.y },
-  spawnT: 0,
-  hideT: 0,
-  clearT: 0,
-  shootCd: 0,
-  punchCd: 0,
-  holdT: 0,
-  holdHeatT: 0,
-  msg: "",
-  msgT: 0,
-  musicOn: true,
-  engineNote: 0
-};
-
-var canvas = null, ctx = null;
-try { canvas = document.getElementById("game"); } catch (e) { canvas = null; }
-if (canvas) { try { ctx = canvas.getContext("2d"); } catch (e) { ctx = null; } }
-
-/* ---------------- audio (all guarded: the game runs with no AudioContext) ---------------- */
-var AC = null;
-function audioCtx() {
-  if (AC) return AC;
-  try {
-    var Ctor = (typeof window !== "undefined") ? (window.AudioContext || window.webkitAudioContext) : null;
-    if (!Ctor) return null;
-    AC = new Ctor();
-  } catch (e) { AC = null; }
-  return AC;
-}
-function tone(freq, dur, type, vol, slideTo) {
-  try {
-    var ac = audioCtx();
-    if (!ac) return;
-    if (ac.state === "suspended") ac.resume();
-    var o = ac.createOscillator(), g = ac.createGain();
-    o.type = type || "square";
-    o.frequency.setValueAtTime(freq, ac.currentTime);
-    if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), ac.currentTime + dur);
-    g.gain.setValueAtTime(vol || 0.05, ac.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
-    o.connect(g); g.connect(ac.destination);
-    o.start(); o.stop(ac.currentTime + dur + 0.02);
-  } catch (e) {}
-}
-function noiseBurst(dur, vol) {
-  try {
-    var ac = audioCtx();
-    if (!ac) return;
-    if (ac.state === "suspended") ac.resume();
-    var len = Math.floor(ac.sampleRate * dur);
-    var buf = ac.createBuffer(1, len, ac.sampleRate);
-    var d = buf.getChannelData(0);
-    for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
-    var src = ac.createBufferSource(), g = ac.createGain();
-    src.buffer = buf;
-    g.gain.setValueAtTime(vol || 0.12, ac.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
-    src.connect(g); g.connect(ac.destination);
-    src.start();
-  } catch (e) {}
-}
-var MUSIC_NOTES = [110, 0, 130.8, 0, 98, 0, 146.8, 0, 110, 0, 164.8, 0, 98, 0, 123.5, 0];
-var musicStep = 0;
-function musicTick() {
-  if (!G.musicOn || G.mode !== "play") return;
-  try {
-    var n = MUSIC_NOTES[musicStep % MUSIC_NOTES.length];
-    musicStep++;
-    if (n) tone(n, 0.22, "triangle", 0.035);
-    if (musicStep % 4 === 0) noiseBurst(0.03, 0.015);
-  } catch (e) {}
-}
-try { setInterval(musicTick, 210); } catch (e) {}
-var sirenPhase = 0;
-function sirenTick() {
-  if (G.mode !== "play" || G.wanted <= 0) return;
-  sirenPhase = 1 - sirenPhase;
-  tone(sirenPhase ? 660 : 520, 0.5, "sine", 0.018);
-}
-try { setInterval(sirenTick, 520); } catch (e) {}
-
-/* ---------------- world generation ---------------- */
-function rectHits(r, pts, pad) {
-  for (var i = 0; i < pts.length; i++) {
-    var p = pts[i];
-    if (p.x > r.x - pad && p.x < r.x + r.w + pad && p.y > r.y - pad && p.y < r.y + r.h + pad) return true;
+  // ---------- small helpers ----------
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  function dist(ax, ay, bx, by) { var dx = ax - bx, dy = ay - by; return Math.sqrt(dx * dx + dy * dy); }
+  function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+  function mulberry(seed) {
+    var s = seed >>> 0;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      var t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
   }
-  return false;
-}
-function buildWorld() {
-  G.buildings = [];
-  G.landmarks = [];
-  var i, j;
-  /* landmark buildings (hand-placed, labelled on the map) */
-  var lm = [
-    { x: 340, y: 330, w: 160, h: 40, color: "#e8a87c", label: "Sunset Motel" },
-    { x: 600, y: 330, w: 150, h: 40, color: "#9db3c8", label: "Reef Garage" },
-    { x: 1120, y: 330, w: 140, h: 40, color: "#8a7f8d", label: "Ironclad Guns" },
-    { x: 1640, y: 330, w: 140, h: 40, color: "#5da9a0", label: "Pay 'n Spray" },
-    { x: 600, y: 1110, w: 140, h: 40, color: "#d9b36c", label: "Golden Palm Pawn" },
-    { x: 1380, y: 1110, w: 180, h: 40, color: "#c8c2b4", label: "First Palmetto Bank" },
-    { x: 1640, y: 1880, w: 260, h: 50, color: "#b388c9", label: "Palmetto Mall" },
-    { x: 1900, y: 1560, w: 180, h: 180, color: "#7d8aa0", label: "Palmetto Bowl" },
-    { x: 340, y: 950, w: 160, h: 200, color: "#e8e4da", label: "Palmetto General" },
-    { x: 2160, y: 590, w: 120, h: 40, color: "#f2c9a0", label: "Safehouse" }
-  ];
-  for (i = 0; i < lm.length; i++) { G.landmarks.push(lm[i]); G.buildings.push(lm[i]); }
 
-  /* protected points: nothing built on top of these */
-  var keep = [];
-  var k;
-  for (k in PLACES) keep.push({ x: PLACES[k].x, y: PLACES[k].y });
-  keep.push({ x: SPAWN.x, y: SPAWN.y });
-  var pkgPts = [[300, 1460], [180, 700], [2200, 1300], [600, 1900], [1200, 1600], [900, 2050], [2000, 500], [400, 100], [1500, 1000], [2250, 2100]];
-  for (i = 0; i < pkgPts.length; i++) keep.push({ x: pkgPts[i][0], y: pkgPts[i][1] });
-  var parkSpots = [[300, 700], [900, 440], [1200, 700], [1700, 1220], [400, 1480], [2100, 1760], [600, 2000], [1900, 440]];
-  for (i = 0; i < parkSpots.length; i++) keep.push({ x: parkSpots[i][0], y: parkSpots[i][1] });
-  keep.push({ x: 950, y: 440 });
+  // ---------- places ----------
+  var PLACES = {
+    motel:     { x: 290,  y: 420,  label: "Seaside Motel" },
+    garage:    { x: 550,  y: 420,  label: "Reef's Garage" },
+    docks:     { x: 290,  y: 1980, label: "Port Palmetto" },
+    pawn:      { x: 550,  y: 1200, label: "Lucky Pawn" },
+    stadium:   { x: 2100, y: 1750, label: "Palmetto Stadium" },
+    safehouse: { x: 2110, y: 680,  label: "Safehouse" },
+    bank:      { x: 1330, y: 1200, label: "Palmetto Bank" },
+    park:      { x: 1070, y: 810,  label: "Palmetto Park" },
+    mall:      { x: 1590, y: 1980, label: "Palmetto Mall" },
+    spray:     { x: 1590, y: 420,  label: "Pay 'n Spray" },
+    gunshop:   { x: 1070, y: 420,  label: "Ammo Barn" },
+    hospital:  { x: 300,  y: 900,  label: "Palmetto General" },
+    airport:   { x: 2100, y: 2200, label: "Palmetto Airfield" },
+    pdhq:      { x: 680,  y: 1200, label: "PPD Headquarters" },
+    beach:     { x: 1200, y: 2320, label: "Palmetto Beach" }
+  };
+  var TAXI_DESTS = [PLACES.airport, PLACES.hospital, PLACES.mall, PLACES.stadium, PLACES.docks, PLACES.bank];
 
-  var palette = ["#e8a87c", "#d9b36c", "#a8c686", "#8fb8c9", "#e0aaff", "#f2c9a0", "#9db3c8", "#c9ada7", "#b5c9a3", "#e6b8a2"];
-  var noBuild = [
-    { x: 900, y: 660, w: 330, h: 290 },    /* Hibiscus Park */
-    { x: 1880, y: 1540, w: 380, h: 380 },  /* stadium grounds */
-    { x: 2155, y: 0, w: 245, h: 2400 },    /* beach strip */
-    { x: 1200, y: 0, w: 1150, h: 130 },    /* airfield */
-    { x: 0, y: 2025, w: 2400, h: 375 }     /* port */
-  ];
-  function overlapsZone(r) {
-    for (var z = 0; z < noBuild.length; z++) {
-      var q = noBuild[z];
-      if (r.x < q.x + q.w && r.x + r.w > q.x && r.y < q.y + q.h && r.y + r.h > q.y) return true;
+  // ---------- buildings (block interiors only; roads, park and hospital stay clear) ----------
+  var BUILDINGS = [];
+  function buildCity() {
+    BUILDINGS = [];
+    var rng = mulberry(19970704);
+    var palette = ["#8d7d6b", "#7a6a8f", "#6b7f8d", "#96705a", "#5f7a5e", "#8f7a4d", "#74605a"];
+    var bx, by, i, j, x0, y0, w, h;
+    for (i = 0; i < ROAD_XS.length - 1; i++) {
+      for (j = 0; j < ROAD_YS.length - 1; j++) {
+        x0 = ROAD_XS[i] + ROAD_HALF + 14;
+        y0 = ROAD_YS[j] + ROAD_HALF + 14;
+        w = ROAD_XS[i + 1] - ROAD_XS[i] - 2 * ROAD_HALF - 28;
+        h = ROAD_YS[j + 1] - ROAD_YS[j] - 2 * ROAD_HALF - 28;
+        // Park block and hospital block stay open.
+        if (x0 > 980 && x0 < 1160 && y0 > 720 && y0 < 900) continue;
+        if (x0 > 200 && x0 < 380 && y0 > 720 && y0 < 900) continue;
+        // The stadium block holds the stadium bowl, not offices.
+        if (x0 > 2020 && x0 < 2200 && y0 > 1760 && y0 < 1940) continue;
+        if (rng() < 0.22) continue; // a few empty lots keep the city breathing
+        var split = rng() < 0.45;
+        if (split) {
+          BUILDINGS.push({ x: x0, y: y0, w: w * 0.46, h: h, color: palette[Math.floor(rng() * palette.length)] });
+          BUILDINGS.push({ x: x0 + w * 0.54, y: y0, w: w * 0.46, h: h, color: palette[Math.floor(rng() * palette.length)] });
+        } else {
+          BUILDINGS.push({ x: x0, y: y0, w: w, h: h, color: palette[Math.floor(rng() * palette.length)] });
+        }
+      }
     }
+    // Landmark blocks: bank, hospital, stadium bowl, PD HQ.
+    BUILDINGS.push({ x: 1290, y: 1160, w: 120, h: 80, color: "#b8a05a", label: "BANK" });
+    BUILDINGS.push({ x: 240, y: 830, w: 130, h: 90, color: "#dfe8ee", label: "HOSPITAL" });
+    BUILDINGS.push({ x: 2040, y: 1790, w: 180, h: 120, color: "#4d6b8a", label: "STADIUM" });
+    BUILDINGS.push({ x: 640, y: 1160, w: 110, h: 80, color: "#3d5a80", label: "PD HQ" });
+  }
+
+  // ---------- missions ----------
+  var MISSIONS = [
+    { id: "m1", title: "1 — First Wheels", text: "Meet Lena at the Seaside Motel, steal a parked car, then drive it to Reef's Garage." },
+    { id: "m2", title: "2 — Dockside Run", text: "Walk to Port Palmetto, then drive to Lucky Pawn." },
+    { id: "m3", title: "3 — The GT", text: "Go to Palmetto Stadium on foot and steal the parked Palmetto GT, then drive it to the garage." },
+    { id: "m4", title: "4 — Lay Low", text: "Lose the heat, then walk to the safehouse." },
+    { id: "m5", title: "5 — Park and Ride", text: "Walk to Palmetto Park, then drive to Palmetto Mall." },
+    { id: "m6", title: "6 — The Big One", text: "Walk into Palmetto Bank and hold the lobby, then escape by car to the safehouse." }
+  ];
+  var PAYOUTS = [300, 500, 700, 500, 1000, 2500];
+
+  // ---------- game state ----------
+  var G = null;
+  var keys = {};
+  var mouse = { x: 640, y: 360, down: false };
+  var cam = { x: 160, y: 420 };
+  var timeMin = 480; // 08:00
+  var bullets = [];
+  var parts = [];
+  var floaters = [];
+  var packages = [];
+  var wantedT = 0, policeT = 0, holdT = 0, holdSpawnT = 0;
+  var punchCd = 0, shootCd = 0, fireHeld = false;
+  var musicOn = true, musicTimer = null, musicStep = 0;
+  var respawnTimer = null;
+  var msgText = "";
+  var engineOsc = null, engineGain = null;
+  var audioCtx = null;
+
+  function freshState() {
+    return {
+      mode: "menu",
+      player: { x: 160, y: 420, a: 0, onFoot: true, car: null, hp: 100 },
+      cars: [], peds: [], cops: [], copCars: [],
+      missionIdx: 0, missionStep: 0,
+      cash: 250, wanted: 0, health: 100, ammo: 24,
+      carsStolen: 0, packagesGot: 0, taxi: null,
+      weapon: 2
+    };
+  }
+
+  var CAR_MODELS = [
+    { name: "Vice Sedan", color: "#c94f4f", w: 46, h: 22 },
+    { name: "Suncoast Taxi", color: "#e8c33a", w: 46, h: 22 },
+    { name: "Harbor Van", color: "#7a8a99", w: 52, h: 24 },
+    { name: "Beach Cruiser", color: "#4fa8c9", w: 48, h: 22 },
+    { name: "Palmetto Truck", color: "#6b8e5a", w: 56, h: 26 }
+  ];
+  var GT_MODEL = { name: "Palmetto GT", color: "#e86a1c", w: 48, h: 22 };
+
+  function makeCar(x, y, a, model, parked) {
+    return {
+      x: x, y: y, a: a, speed: 0, parked: !!parked, dead: false, police: false,
+      model: model, hp: 100, ai: !parked, cruise: rand(120, 180), turnT: rand(1, 4),
+      stolen: false, ramCd: 0
+    };
+  }
+  function makeCopCar(x, y) {
+    return {
+      x: x, y: y, a: 0, speed: 0, parked: false, dead: false, police: true,
+      model: { name: "PPD Interceptor", color: "#20242c", w: 48, h: 22 },
+      hp: 100, ai: true, cruise: 310, ramCd: 0, deployT: 4
+    };
+  }
+  function makePed(x, y, taxi) {
+    return { x: x, y: y, a: rand(0, Math.PI * 2), taxi: !!taxi, speed: taxi ? 0 : rand(28, 55), hp: 30, dead: false, walkT: rand(0, 3), hue: pick(["#e8b04b", "#4b7de8", "#c94f9b", "#7bc94f", "#e8e4da", "#8a5fc9"]) };
+  }
+  function makeCop(x, y) {
+    return { x: x, y: y, a: 0, speed: 150, hp: 60, shootT: rand(1, 2.5), punchT: 0 };
+  }
+
+  function spawnWorld() {
+    G.cars = [];
+    // Parked cars first: the first one is the cdp-play car on the motel road.
+    G.cars.push(makeCar(220, 420, 0, CAR_MODELS[0], true));
+    G.cars.push(makeCar(2100, 1760, Math.PI / 2, GT_MODEL, true));
+    G.cars.push(makeCar(480, 420, 0, CAR_MODELS[1], true));
+    G.cars.push(makeCar(1590, 470, Math.PI / 2, CAR_MODELS[2], true));
+    G.cars.push(makeCar(1070, 470, Math.PI / 2, CAR_MODELS[3], true));
+    G.cars.push(makeCar(1330, 1150, Math.PI, CAR_MODELS[0], true));
+    G.cars.push(makeCar(290, 1930, Math.PI / 2, CAR_MODELS[4], true));
+    G.cars.push(makeCar(2110, 730, 0, CAR_MODELS[1], true));
+    // Traffic on the roads.
+    var i, rx, ry, horiz;
+    for (i = 0; i < 18; i++) {
+      horiz = Math.random() < 0.5;
+      if (horiz) { rx = rand(200, 2200); ry = pick(ROAD_YS) + (Math.random() < 0.5 ? -18 : 18); }
+      else { rx = pick(ROAD_XS) + (Math.random() < 0.5 ? -18 : 18); ry = rand(200, 2200); }
+      var c = makeCar(rx, ry, horiz ? (ry % 36 < 18 ? 0 : Math.PI) : (rx % 36 < 18 ? Math.PI / 2 : -Math.PI / 2), pick(CAR_MODELS), false);
+      c.speed = c.cruise;
+      G.cars.push(c);
+    }
+    // Pedestrians: wanderers plus three waiting fare peds.
+    G.peds = [];
+    for (i = 0; i < 23; i++) {
+      var px = pick(ROAD_XS) + rand(-30, 30), py = pick(ROAD_YS) + rand(-30, 30);
+      G.peds.push(makePed(clamp(px, 80, 2320), clamp(py, 80, 2320), false));
+    }
+    G.peds.push(makePed(420, 940, true));
+    G.peds.push(makePed(1720, 680, true));
+    G.peds.push(makePed(940, 1460, true));
+    // Hidden packages: ten, all on roads.
+    var spots = [[300, 1460], [420, 680], [940, 1980], [1460, 420], [1980, 940], [680, 1720], [1720, 1460], [2240, 680], [1200, 2240], [160, 1720]];
+    packages = spots.map(function (s) { return { x: s[0], y: s[1], got: false }; });
+    G.cops = []; G.copCars = [];
+    bullets = []; parts = []; floaters = [];
+    wantedT = 0; policeT = 0; holdT = 0; holdSpawnT = 0;
+    punchCd = 0; shootCd = 0; fireHeld = false;
+  }
+
+  buildCity();
+  G = freshState();
+
+  // ---------- DOM helpers (guarded: the page may not have every id) ----------
+  function el(id) {
+    try { return document.getElementById(id); } catch (e) { return null; }
+  }
+  function show(id, on) {
+    var n = el(id);
+    if (!n || !n.classList) return;
+    if (on) n.classList.remove("hidden"); else n.classList.add("hidden");
+  }
+  function setText(id, txt) {
+    var n = el(id);
+    if (n) n.textContent = txt;
+  }
+
+  // ---------- audio (fully guarded: runs fine with no AudioContext) ----------
+  function audioInit() {
+    if (audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx || !musicOn && type === "music") return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "square"; o.frequency.value = freq;
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, slide), audioCtx.currentTime + dur);
+      g.gain.value = vol || 0.08;
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function noiseBurst(dur, vol) {
+    if (!audioCtx) return;
+    try {
+      var len = Math.floor(audioCtx.sampleRate * dur);
+      var buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+      var d = buf.getChannelData(0), i;
+      for (i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      var src = audioCtx.createBufferSource(); src.buffer = buf;
+      var g = audioCtx.createGain(); g.gain.value = vol || 0.2;
+      src.connect(g); g.connect(audioCtx.destination); src.start();
+    } catch (e) {}
+  }
+  function sfx(name) {
+    if (!audioCtx) return;
+    if (name === "shot") noiseBurst(0.12, 0.25);
+    else if (name === "punch") tone(140, 0.1, "sine", 0.2, 60);
+    else if (name === "pickup") { tone(660, 0.1, "sine", 0.1); setTimeout(function () { tone(880, 0.14, "sine", 0.1); }, 90); }
+    else if (name === "cash") { tone(990, 0.08, "sine", 0.1); setTimeout(function () { tone(1320, 0.12, "sine", 0.1); }, 80); }
+    else if (name === "mission") { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { tone(f, 0.18, "triangle", 0.12); }, i * 110); }); }
+    else if (name === "siren") tone(700, 0.3, "sawtooth", 0.03, 950);
+    else if (name === "enter") tone(220, 0.12, "triangle", 0.1, 330);
+    else if (name === "boom") noiseBurst(0.5, 0.35);
+  }
+  function musicTick() {
+    if (!audioCtx || !musicOn || G.mode !== "play") return;
+    var bass = [55, 55, 65.4, 49, 55, 55, 73.4, 82.4];
+    var lead = [220, 0, 261.6, 0, 329.6, 0, 293.7, 246.9];
+    var b = bass[musicStep % 8], l = lead[musicStep % 8];
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = "triangle"; o.frequency.value = b;
+      g.gain.value = 0.05; g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.24);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.24);
+      if (l) {
+        var o2 = audioCtx.createOscillator(), g2 = audioCtx.createGain();
+        o2.type = "sine"; o2.frequency.value = l;
+        g2.gain.value = 0.03; g2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.22);
+        o2.connect(g2); g2.connect(audioCtx.destination); o2.start(); o2.stop(audioCtx.currentTime + 0.22);
+      }
+    } catch (e) {}
+    musicStep++;
+  }
+
+  // ---------- collisions ----------
+  function hitBuilding(x, y, r) {
+    for (var i = 0; i < BUILDINGS.length; i++) {
+      var b = BUILDINGS[i];
+      if (x + r > b.x && x - r < b.x + b.w && y + r > b.y && y - r < b.y + b.h) return b;
+    }
+    return null;
+  }
+  function moveWithCollision(ent, nx, ny, r) {
+    var b;
+    if (!hitBuilding(nx, ent.y, r)) ent.x = nx;
+    if (!hitBuilding(ent.x, ny, r)) ent.y = ny;
+    b = hitBuilding(ent.x, ent.y, r);
+    if (b) { // pushed out along the smallest overlap
+      var dxl = ent.x + r - b.x, dxr = b.x + b.w - (ent.x - r);
+      var dyt = ent.y + r - b.y, dyb = b.y + b.h - (ent.y - r);
+      var m = Math.min(dxl, dxr, dyt, dyb);
+      if (m === dxl) ent.x = b.x - r; else if (m === dxr) ent.x = b.x + b.w + r;
+      else if (m === dyt) ent.y = b.y - r; else ent.y = b.y + b.h + r;
+    }
+    ent.x = clamp(ent.x, 30, WORLD_W - 30);
+    ent.y = clamp(ent.y, 30, WORLD_H - 30);
+  }
+
+  // ---------- police ----------
+  function addHeat(n) {
+    if (G.mode !== "play") return;
+    G.wanted = clamp(G.wanted + n, 0, 5);
+    if (G.wanted > 0) {
+      spawnCopCar(); spawnCop();
+      sfx("siren");
+    }
+  }
+  function spawnNearPlayer(minD, maxD) {
+    var a = rand(0, Math.PI * 2), d = rand(minD, maxD);
+    return { x: clamp(G.player.x + Math.cos(a) * d, 90, WORLD_W - 90), y: clamp(G.player.y + Math.sin(a) * d, 90, WORLD_H - 90) };
+  }
+  function spawnCopCar() {
+    if (G.copCars.length >= 6) return;
+    var p = spawnNearPlayer(320, 480);
+    var c = makeCopCar(p.x, p.y);
+    G.copCars.push(c);
+  }
+  function spawnCop() {
+    if (G.cops.length >= 8) return;
+    var p = spawnNearPlayer(200, 380);
+    G.cops.push(makeCop(p.x, p.y));
+  }
+
+  // ---------- combat ----------
+  function fireBullet() {
+    if (G.weapon !== 2 || G.ammo <= 0 || G.mode !== "play") return;
+    G.ammo--;
+    var p = G.player;
+    var sx = p.onFoot ? p.x : p.car.x, sy = p.onFoot ? p.y : p.car.y;
+    var a = Math.atan2(mouse.y - 360, mouse.x - 640); // screen-aim fallback
+    var wx = cam.x - 640 + mouse.x, wy = cam.y - 360 + mouse.y;
+    a = Math.atan2(wy - sy, wx - sx);
+    bullets.push({ x: sx + Math.cos(a) * 26, y: sy + Math.sin(a) * 26, a: a, speed: 900, life: 1.1, dmg: 20 });
+    p.a = a;
+    sfx("shot");
+    parts.push({ x: sx + Math.cos(a) * 30, y: sy + Math.sin(a) * 30, vx: 0, vy: 0, life: 0.08, max: 0.08, color: "#ffd166", r: 7 });
+  }
+  function doPunch() {
+    if (G.mode !== "play" || punchCd > 0) return;
+    punchCd = 0.45;
+    var p = G.player, hit = null, best = 60;
+    var i, d;
+    for (i = 0; i < G.cops.length; i++) { d = dist(p.x, p.y, G.cops[i].x, G.cops[i].y); if (d < best) { best = d; hit = G.cops[i]; } }
+    for (i = 0; i < G.peds.length; i++) { if (G.peds[i].dead) continue; d = dist(p.x, p.y, G.peds[i].x, G.peds[i].y); if (d < best) { best = d; hit = G.peds[i]; } }
+    sfx("punch");
+    if (hit) {
+      hit.hp -= 10;
+      hit.x += Math.cos(p.a) * 14; hit.y += Math.sin(p.a) * 14;
+      if (hit.hp <= 0) killPedOrCop(hit);
+    }
+  }
+  function killPedOrCop(v) {
+    if (v.hp > 0) return;
+    if (G.cops.indexOf(v) >= 0) {
+      G.cops.splice(G.cops.indexOf(v), 1);
+      addHeat(1);
+    } else if (G.peds.indexOf(v) >= 0) {
+      v.dead = true;
+      addHeat(1);
+    }
+    burst(v.x, v.y, "#ff5d5d", 10);
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      var a = rand(0, Math.PI * 2), s = rand(40, 180);
+      parts.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.3, 0.7), max: 0.7, color: color, r: rand(2, 5) });
+    }
+  }
+  function damagePlayer(n) {
+    if (G.mode !== "play") return;
+    G.health -= n;
+    if (G.health <= 0) {
+      G.health = 0;
+      G.mode = "wasted";
+      show("wasted", true); show("hud", false);
+      if (respawnTimer) clearTimeout(respawnTimer);
+      respawnTimer = setTimeout(respawn, 3000);
+    }
+  }
+  function respawn() {
+    var p = G.player;
+    p.x = HOSPITAL.x; p.y = HOSPITAL.y; p.onFoot = true; p.car = null; p.a = 0;
+    G.health = 100; G.wanted = 0; G.cops = []; G.copCars = [];
+    G.mode = "play";
+    show("wasted", false); show("hud", true);
+    setMsg("Patched up at Palmetto General. Back to work, Reef.");
+    syncHud();
+  }
+
+  // ---------- car enter / exit ----------
+  function nearestCar(maxD) {
+    var best = null, bd = maxD, i, d;
+    for (i = 0; i < G.cars.length; i++) {
+      var c = G.cars[i];
+      if (c.dead || c.police) continue;
+      d = dist(G.player.x, G.player.y, c.x, c.y);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+  function enterCar(c) {
+    var p = G.player;
+    p.onFoot = false; p.car = c;
+    if (c.parked && !c.stolen) { c.stolen = true; G.carsStolen++; }
+    c.parked = false; c.ai = false; c.speed = 0;
+    sfx("enter");
+    if (G.missionIdx === 2 && G.missionStep === 0 && c.model.name === "Palmetto GT" && dist(p.x, p.y, PLACES.stadium.x, PLACES.stadium.y) < 220) {
+      G.missionStep = 1;
+      setMsg("The GT is yours. Get it to Reef's Garage — quiet, no heat.");
+    }
+  }
+  function exitCar() {
+    var p = G.player;
+    if (!p.car) return;
+    var c = p.car;
+    p.x = c.x + Math.cos(c.a + Math.PI / 2) * 34;
+    p.y = c.y + Math.sin(c.a + Math.PI / 2) * 34;
+    p.onFoot = true; p.car = null;
+    c.parked = true; c.speed = 0;
+  }
+  function pressE() {
+    if (G.mode !== "play") return;
+    var p = G.player;
+    if (!p.onFoot) { exitCar(); return; }
+    var c = nearestCar(70);
+    if (c) { enterCar(c); return; }
+    if (dist(p.x, p.y, PLACES.gunshop.x, PLACES.gunshop.y) < 60) {
+      if (G.cash >= 50) {
+        G.cash -= 50; G.ammo += 24;
+        setMsg("Ammo Barn: +24 pistol rounds for $50.");
+        sfx("cash");
+      } else setMsg("Ammo Barn: you need $50 for a box of rounds.");
+    }
+  }
+  function pressT() {
+    if (G.mode !== "play" || G.player.onFoot || G.taxi) return;
+    var p = G.player, i, f = null, bd = 70, d;
+    for (i = 0; i < G.peds.length; i++) {
+      if (!G.peds[i].taxi || G.peds[i].dead) continue;
+      d = dist(p.x, p.y, G.peds[i].x, G.peds[i].y);
+      if (d < bd) { bd = d; f = G.peds[i]; }
+    }
+    if (!f) return;
+    f.taxi = false;
+    var dest = pick(TAXI_DESTS);
+    G.taxi = { fare: 40 + Math.floor(Math.random() * 51), dx: dest.x, dy: dest.y, label: dest.label };
+    setMsg("Fare picked up — take them to " + dest.label + " ($" + G.taxi.fare + ").");
+    sfx("pickup");
+  }
+
+  // ---------- save / load ----------
+  function saveGame() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        cash: G.cash, missionIdx: G.missionIdx, missionStep: G.missionStep,
+        health: G.health, ammo: G.ammo, carsStolen: G.carsStolen,
+        packagesGot: G.packagesGot, x: G.player.x, y: G.player.y,
+        wanted: G.wanted, timeMin: timeMin
+      }));
+    } catch (e) {}
+  }
+  function loadSave() {
+    try {
+      var raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      var s = JSON.parse(raw);
+      if (!s || typeof s.cash !== "number" || typeof s.missionIdx !== "number") return null;
+      return s;
+    } catch (e) { return null; }
+  }
+  function applySave(s) {
+    G.cash = s.cash; G.missionIdx = s.missionIdx; G.missionStep = s.missionStep || 0;
+    G.health = s.health != null ? s.health : 100;
+    G.ammo = s.ammo != null ? s.ammo : 24;
+    G.carsStolen = s.carsStolen || 0; G.packagesGot = s.packagesGot || 0;
+    G.wanted = 0;
+    G.player.x = s.x != null ? s.x : 160; G.player.y = s.y != null ? s.y : 420;
+    if (s.timeMin != null) timeMin = s.timeMin;
+  }
+
+  // ---------- game start ----------
+  function startGame(fromSave) {
+    var saved = fromSave ? loadSave() : null;
+    if (respawnTimer) { clearTimeout(respawnTimer); respawnTimer = null; }
+    audioInit();
+    if (audioCtx && audioCtx.state === "suspended") { try { audioCtx.resume(); } catch (e) {} }
+    // Reset the SAME state object (never reassign G): window.__PALMETTO.G
+    // must keep pointing at the live state after every start.
+    var ns = freshState();
+    for (var k in ns) G[k] = ns[k];
+    spawnWorld();
+    timeMin = 480;
+    G.mode = "play";
+    if (saved) {
+      applySave(saved);
+      setMsg("Welcome back, Reef. " + (MISSIONS[G.missionIdx] ? MISSIONS[G.missionIdx].text : "Palmetto City is yours."));
+    } else {
+      setMsg(MISSIONS[0].text);
+    }
+    show("menu", false); show("pause", false); show("wasted", false); show("hud", true);
+    syncHud();
+    if (!musicTimer) musicTimer = setInterval(musicTick, 250);
+  }
+  function togglePause() {
+    if (G.mode === "play") { G.mode = "paused"; show("pause", true); }
+    else if (G.mode === "paused") { G.mode = "play"; show("pause", false); }
+  }
+  function setMsg(t) { msgText = t; setText("msg", t); }
+
+  // ---------- input ----------
+  function keyDown(k) { return !!keys[k]; }
+  function anyKey(list) { for (var i = 0; i < list.length; i++) if (keys[list[i]]) return true; return false; }
+  function onKey(e, down) {
+    var k = (e.key || "").toLowerCase();
+    keys[k] = down;
+    if (down && (k === " " || k.indexOf("arrow") === 0)) { if (e.preventDefault) e.preventDefault(); }
+    if (!down) return;
+    if (k === "e") pressE();
+    else if (k === "t") pressT();
+    else if (k === "1") { G.weapon = 1; syncHud(); }
+    else if (k === "2") { G.weapon = 2; syncHud(); }
+    else if (k === " ") doPunch();
+    else if (k === "m") { musicOn = !musicOn; setMsg(musicOn ? "Music on." : "Music off."); }
+    else if (k === "p" || k === "escape") togglePause();
+  }
+  function onMouseMove(e) {
+    var c = el("game");
+    if (!c || !c.getBoundingClientRect) return;
+    var r = c.getBoundingClientRect();
+    var sx = (e.clientX - r.left) * (c.width / (r.width || 1280));
+    var sy = (e.clientY - r.top) * (c.height / (r.height || 720));
+    mouse.x = sx; mouse.y = sy;
+  }
+  function onMouseDown(e) {
+    if (G.mode !== "play") return;
+    fireHeld = true;
+    fireBullet();
+  }
+  function onMouseUp() { fireHeld = false; }
+  try {
+    window.addEventListener("keydown", function (e) { onKey(e, true); });
+    window.addEventListener("keyup", function (e) { onKey(e, false); });
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
+  } catch (e) {}
+
+  // ---------- missions ----------
+  function nearPt(x, y, r) { return dist(G.player.x, G.player.y, x, y) < r; }
+  function completeMission(i) {
+    G.cash += PAYOUTS[i];
+    G.missionIdx = i + 1;
+    G.missionStep = 0;
+    holdT = 0;
+    sfx("mission");
+    if (G.missionIdx >= 6) setMsg("ALL MISSIONS COMPLETE — Palmetto City is yours, Reef. $5,000+ in the pocket.");
+    else setMsg(MISSIONS[G.missionIdx].text);
+    syncHud();
+  }
+  function updateMission(dt) {
+    var idx = G.missionIdx, p = G.player;
+    if (idx >= 6) return;
+    if (idx === 0) {
+      if (G.missionStep === 0 && p.onFoot && nearPt(PLACES.motel.x, PLACES.motel.y, 60)) {
+        G.missionStep = 1;
+        setMsg("Lena: good, you're here. Steal a parked car — any one. Make it quick.");
+      } else if (G.missionStep === 1 && G.carsStolen >= 1) {
+        G.missionStep = 2;
+        setMsg("Nice wheels. Now drive it to Reef's Garage.");
+      } else if (G.missionStep === 2 && !p.onFoot && nearPt(PLACES.garage.x, PLACES.garage.y, 60)) completeMission(0);
+    } else if (idx === 1) {
+      if (G.missionStep === 0 && p.onFoot && nearPt(PLACES.docks.x, PLACES.docks.y, 60)) {
+        G.missionStep = 1;
+        setMsg("Dockside done. Now drive to Lucky Pawn.");
+      } else if (G.missionStep === 1 && !p.onFoot && nearPt(PLACES.pawn.x, PLACES.pawn.y, 60)) completeMission(1);
+    } else if (idx === 2) {
+      if (G.missionStep === 1 && !p.onFoot && nearPt(PLACES.garage.x, PLACES.garage.y, 60)) completeMission(2);
+    } else if (idx === 3) {
+      if (G.missionStep === 0 && G.wanted === 0 && p.onFoot && nearPt(PLACES.safehouse.x, PLACES.safehouse.y, 60)) completeMission(3);
+    } else if (idx === 4) {
+      if (G.missionStep === 0 && p.onFoot && nearPt(PLACES.park.x, PLACES.park.y, 60)) {
+        G.missionStep = 1;
+        setMsg("Park's clear. Now drive to Palmetto Mall.");
+      } else if (G.missionStep === 1 && !p.onFoot && nearPt(PLACES.mall.x, PLACES.mall.y, 60)) completeMission(4);
+    } else if (idx === 5) {
+      if (G.missionStep === 0 && p.onFoot && nearPt(PLACES.bank.x, PLACES.bank.y, 60)) {
+        G.missionStep = 1; holdT = 0; holdSpawnT = 0;
+        setMsg("Hold the lobby... 8 seconds. The PD is coming.");
+      } else if (G.missionStep === 1) {
+        if (nearPt(PLACES.bank.x, PLACES.bank.y, 80)) {
+          holdT += dt;
+          holdSpawnT -= dt;
+          if (holdSpawnT <= 0) {
+            holdSpawnT = 2;
+            if (G.cops.length < 3) spawnCop();
+            G.wanted = Math.min(3, Math.max(G.wanted, 2));
+          }
+          if (holdT >= 8) {
+            G.missionStep = 2;
+            setMsg("Got it! Now escape by car to the safehouse!");
+            sfx("mission");
+          }
+        } else if (dist(G.player.x, G.player.y, PLACES.bank.x, PLACES.bank.y) > 150) holdT = 0;
+      } else if (G.missionStep === 2 && !p.onFoot && nearPt(PLACES.safehouse.x, PLACES.safehouse.y, 60)) completeMission(5);
+    }
+  }
+
+  // ---------- traffic helpers ----------
+  function nearestLine(v, lines) {
+    var best = lines[0], bd = Math.abs(v - lines[0]), i;
+    for (i = 1; i < lines.length; i++) { var d = Math.abs(v - lines[i]); if (d < bd) { bd = d; best = lines[i]; } }
+    return best;
+  }
+  function onRoad(x, y) {
+    var i;
+    for (i = 0; i < ROAD_XS.length; i++) if (Math.abs(x - ROAD_XS[i]) < 62) return true;
+    for (i = 0; i < ROAD_YS.length; i++) if (Math.abs(y - ROAD_YS[i]) < 62) return true;
     return false;
   }
-  for (i = 0; i < BLOCKS_X.length; i++) {
-    for (j = 0; j < BLOCKS_Y.length; j++) {
-      var bx0 = BLOCKS_X[i][0], bx1 = BLOCKS_X[i][1];
-      var by0 = BLOCKS_Y[j][0], by1 = BLOCKS_Y[j][1];
-      var bw = bx1 - bx0, bh = by1 - by0;
-      if (bw < 90 || bh < 90) continue;
-      var count = irnd(1, 2);
-      for (var n = 0; n < count; n++) {
-        var w = irnd(60, Math.min(150, bw - 24));
-        var h = irnd(50, Math.min(120, bh - 24));
-        var x = bx0 + 12 + Math.floor(rng() * Math.max(1, bw - w - 24));
-        var y = by0 + 12 + Math.floor(rng() * Math.max(1, bh - h - 24));
-        var r = { x: x, y: y, w: w, h: h, color: pick(palette), label: "" };
-        if (overlapsZone(r)) continue;
-        if (rectHits(r, keep, 60)) continue;
-        var clash = false;
-        for (var b = 0; b < G.buildings.length; b++) {
-          var o = G.buildings[b];
-          if (r.x < o.x + o.w + 8 && r.x + r.w + 8 > o.x && r.y < o.y + o.h + 8 && r.y + r.h + 8 > o.y) { clash = true; break; }
-        }
-        if (clash) continue;
-        G.buildings.push(r);
+
+  // ---------- main update ----------
+  function update(dt) {
+    if (!G || G.mode !== "play") return;
+    if (!(dt > 0)) dt = 0.016;
+    if (dt > 0.05) dt = 0.05;
+    var p = G.player, i, j;
+    timeMin = (timeMin + dt * 6) % 1440;
+    if (punchCd > 0) punchCd -= dt;
+    if (shootCd > 0) shootCd -= dt;
+    if (fireHeld && G.weapon === 2 && shootCd <= 0) fireBullet();
+
+    // --- player on foot ---
+    if (p.onFoot) {
+      var mx = 0, my = 0;
+      if (anyKey(["a", "arrowleft"])) mx -= 1;
+      if (anyKey(["d", "arrowright"])) mx += 1;
+      if (anyKey(["w", "arrowup"])) my -= 1;
+      if (anyKey(["s", "arrowdown"])) my += 1;
+      if (mx || my) {
+        var len = Math.sqrt(mx * mx + my * my); mx /= len; my /= len;
+        var sp = keys["shift"] ? RUN_SPEED : WALK_SPEED;
+        moveWithCollision(p, p.x + mx * sp * dt, p.y + my * sp * dt, 14);
+        p.a = Math.atan2(my, mx);
       }
-    }
-  }
-  /* hidden packages */
-  G.packages = [];
-  for (i = 0; i < pkgPts.length; i++) {
-    G.packages.push({ x: pkgPts[i][0], y: pkgPts[i][1], got: false, bob: rng() * 6 });
-  }
-}
-
-/* ---------------- spawning ---------------- */
-function makeCar(x, y, heading, model, parked, police) {
-  return {
-    x: x, y: y, heading: heading, speed: 0,
-    model: model, parked: !!parked, dead: false, police: !!police,
-    hp: 100, color: model.color, top: model.top,
-    axis: null, road: 0, dir: 1, lane: 12, aiT: 0
-  };
-}
-function spawnTraffic() {
-  G.cars = [];
-  /* parked cars first: the first parked car is the one the player steals first */
-  var parked = [
-    { x: 300, y: 700, h: 0, m: "Coral Sedan" },
-    { x: 900, y: 440, h: 0, m: "Bay Taxi" },
-    { x: 1200, y: 700, h: 0, m: "Palm Van" },
-    { x: 1700, y: 1220, h: 0, m: "Gator Truck" },
-    { x: 400, y: 1480, h: 0, m: "Sunset Coupe" },
-    { x: 2100, y: 1760, h: -Math.PI / 2, m: "Palmetto GT" },
-    { x: 600, y: 2000, h: 0, m: "Hibiscus Hatchback" },
-    { x: 1900, y: 440, h: 0, m: "Marlin Pickup" }
-  ];
-  for (var i = 0; i < parked.length; i++) {
-    var p = parked[i];
-    G.cars.push(makeCar(p.x, p.y, p.h, modelByName(p.m), true, false));
-  }
-  /* traffic on the roads */
-  for (var n = 0; n < 26; n++) {
-    var horiz = rng() < 0.5;
-    var c;
-    if (horiz) {
-      var ry = pick(ROADS_Y);
-      c = makeCar(irnd(80, WORLD_W - 80), ry + (rng() < 0.5 ? -14 : 14), rng() < 0.5 ? 0 : Math.PI, pick(MODELS), false, false);
-      c.axis = "x"; c.road = ry; c.dir = c.heading === 0 ? 1 : -1; c.lane = c.y - ry;
-    } else {
-      var rx = pick(ROADS_X);
-      c = makeCar(rx + (rng() < 0.5 ? -14 : 14), irnd(80, WORLD_H - 80), rng() < 0.5 ? Math.PI / 2 : -Math.PI / 2, pick(MODELS), false, false);
-      c.axis = "y"; c.road = rx; c.dir = c.heading === Math.PI / 2 ? 1 : -1; c.lane = c.x - rx;
-    }
-    c.speed = irnd(90, 140);
-    c.aiT = rng() * 2;
-    G.cars.push(c);
-  }
-}
-function spawnPeds() {
-  G.peds = [];
-  var names = ["Mara", "Dee", "Oscar", "Priya", "Tomas", "Ivy", "Rene", "Kofi", "Ana", "Jules", "Nia", "Marco", "Sofia", "Ben", "Luz", "Kai", "Rosa", "Eli", "Mia", "Theo", "Zoe", "Sam", "Ida", "Leo"];
-  var cols = ["#ff8fa3", "#ffd166", "#8ecae6", "#b5e48c", "#f28482", "#c77dff", "#90be6d", "#f9c74f"];
-  for (var i = 0; i < 24; i++) {
-    var horiz = rng() < 0.5;
-    var x, y;
-    if (horiz) { x = irnd(60, WORLD_W - 60); y = pick(ROADS_Y) + irnd(-30, 30); }
-    else { x = pick(ROADS_X) + irnd(-30, 30); y = irnd(60, WORLD_H - 60); }
-    G.peds.push({
-      x: x, y: y, tx: x, ty: y, speed: irnd(35, 55),
-      name: names[i % names.length], color: pick(cols),
-      taxi: false, waitT: 0, down: false, downT: 0
-    });
-  }
-  /* one fare ped waiting at the taxi stand on the motel road */
-  var fare = G.peds[0];
-  fare.x = 950; fare.y = 440; fare.tx = 950; fare.ty = 440;
-  fare.taxi = true; fare.speed = 0;
-}
-function spawnCopCar() {
-  var spot = pickSpawnSpot(350, 650);
-  var c = makeCar(spot.x, spot.y, angTo(spot.x, spot.y, G.player.x, G.player.y), modelByName("Coral Sedan"), false, true);
-  c.color = "#20242c"; c.top = 300; c.hp = 120; c.speed = 60;
-  G.copCars.push(c);
-  tone(520, 0.2, "sine", 0.03);
-}
-function spawnFootCop() {
-  var spot = pickSpawnSpot(250, 350);
-  G.cops.push({ x: spot.x, y: spot.y, a: 0, speed: 150, hp: 60, shootT: 2, punchT: 0 });
-}
-function pickSpawnSpot(minD, maxD) {
-  var pts = [];
-  for (var i = 0; i < ROADS_X.length; i++) {
-    for (var j = 0; j < ROADS_Y.length; j++) {
-      var x = ROADS_X[i], y = ROADS_Y[j];
-      var d = dist(x, y, G.player.x, G.player.y);
-      if (d >= minD && d <= maxD) pts.push({ x: x, y: y });
-    }
-  }
-  if (pts.length === 0) {
-    var x2 = clamp(G.player.x + (rng() < 0.5 ? -1 : 1) * minD, 60, WORLD_W - 60);
-    var y2 = clamp(G.player.y + (rng() < 0.5 ? -1 : 1) * minD, 60, WORLD_H - 60);
-    return { x: x2, y: y2 };
-  }
-  return pick(pts);
-}
-
-/* ---------------- messages ---------------- */
-function say(text) { G.msg = text; G.msgT = 4; }
-
-/* ---------------- start / save / load ---------------- */
-function startGame(fromSave) {
-  buildWorld();
-  spawnTraffic();
-  spawnPeds();
-  G.cops = [];
-  G.copCars = [];
-  G.particles = [];
-  G.tracers = [];
-  G.missionIdx = 0;
-  G.missionStep = 0;
-  G.cash = 250;
-  G.wanted = 0;
-  G.health = 100;
-  G.ammo = 24;
-  G.weapon = 2;
-  G.carsStolen = 0;
-  G.packagesGot = 0;
-  G.taxi = null;
-  G.clock = 10.5;
-  G.spawnT = 0; G.hideT = 0; G.clearT = 0;
-  G.shootCd = 0; G.punchCd = 0;
-  G.holdT = 0; G.holdHeatT = 0;
-  G.player.x = SPAWN.x; G.player.y = SPAWN.y;
-  G.player.onFoot = true; G.player.car = null; G.player.heading = 0;
-  G.cam.x = SPAWN.x; G.cam.y = SPAWN.y;
-  G.mode = "play";
-  if (fromSave) {
-    var s = loadSave();
-    if (s) {
-      if (typeof s.cash === "number") G.cash = s.cash;
-      if (typeof s.missionIdx === "number") G.missionIdx = s.missionIdx;
-      if (typeof s.missionStep === "number") G.missionStep = s.missionStep;
-      if (typeof s.health === "number") G.health = s.health;
-      if (typeof s.ammo === "number") G.ammo = s.ammo;
-      if (typeof s.carsStolen === "number") G.carsStolen = s.carsStolen;
-      if (typeof s.packagesGot === "number") G.packagesGot = s.packagesGot;
-      if (s.player && typeof s.player.x === "number") { G.player.x = s.player.x; G.player.y = s.player.y; }
-      say("Welcome back to Palmetto City.");
-    }
-  } else {
-    say("Meet Lena at the Sunset Motel.");
-  }
-  syncOverlays();
-  tone(440, 0.15, "triangle", 0.05);
-  tone(660, 0.25, "triangle", 0.05);
-}
-
-var SAVE_KEY = "palmetto-heat-save-v1";
-function saveGame() {
-  try {
-    var data = {
-      cash: G.cash, missionIdx: G.missionIdx, missionStep: G.missionStep,
-      health: G.health, ammo: G.ammo, weapon: G.weapon,
-      carsStolen: G.carsStolen, packagesGot: G.packagesGot,
-      wanted: G.wanted, clock: G.clock,
-      player: { x: Math.round(G.player.x), y: Math.round(G.player.y), onFoot: G.player.onFoot }
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-  } catch (e) {}
-}
-function loadSave() {
-  try {
-    var raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    var data = JSON.parse(raw);
-    if (!data || typeof data.cash !== "number" || typeof data.missionIdx !== "number") return null;
-    return data;
-  } catch (e) { return null; }
-}
-function addHeat(n) {
-  G.wanted = clamp(G.wanted + n, 0, 5);
-  if (G.wanted > 0) { G.hideT = 0; tone(700, 0.2, "sawtooth", 0.03); }
-}
-
-/* ---------------- collision ---------------- */
-function blockedAt(x, y, pad) {
-  if (x < 20 + pad || x > WORLD_W - 20 - pad || y < 20 + pad || y > WORLD_H - 20 - pad) return true;
-  for (var i = 0; i < G.buildings.length; i++) {
-    var b = G.buildings[i];
-    if (x > b.x - pad && x < b.x + b.w + pad && y > b.y - pad && y < b.y + b.h + pad) return true;
-  }
-  return false;
-}
-function moveWithSlide(o, nx, ny, pad) {
-  if (!blockedAt(nx, ny, pad)) { o.x = nx; o.y = ny; return; }
-  if (!blockedAt(nx, o.y, pad)) { o.x = nx; return; }
-  if (!blockedAt(o.x, ny, pad)) { o.y = ny; return; }
-}
-
-/* ---------------- interaction ---------------- */
-function nearestCar(maxD) {
-  var best = null, bd = maxD;
-  for (var i = 0; i < G.cars.length; i++) {
-    var c = G.cars[i];
-    if (c.dead || c.police) continue;
-    var d = dist(G.player.x, G.player.y, c.x, c.y);
-    if (d < bd) { bd = d; best = c; }
-  }
-  return best;
-}
-function enterCar(car) {
-  G.player.onFoot = false;
-  G.player.car = car;
-  if (car.parked) {
-    car.parked = false;
-    G.carsStolen++;
-    say("Car stolen — the " + car.model.name + " is yours now.");
-    tone(330, 0.12, "square", 0.04);
-    if (G.missionIdx === 2 && G.missionStep === 0 && car.model.name === "Palmetto GT" &&
-        dist(car.x, car.y, 2100, 1760) < 150) {
-      G.missionStep = 1;
-      say("That's the GT. Get it to Reef Garage.");
-    }
-  } else {
-    say("You took the " + car.model.name + ".");
-  }
-  if (G.missionIdx === 0 && G.missionStep === 1 && G.carsStolen >= 1) G.missionStep = 2;
-}
-function exitCar() {
-  var car = G.player.car;
-  if (!car) return;
-  G.player.onFoot = true;
-  G.player.car = null;
-  car.speed = 0;
-  var a = car.heading + Math.PI / 2;
-  var nx = car.x + Math.cos(a) * 26, ny = car.y + Math.sin(a) * 26;
-  if (!blockedAt(nx, ny, 10)) { G.player.x = nx; G.player.y = ny; }
-  else { G.player.x = car.x - Math.cos(a) * 26; G.player.y = car.y - Math.sin(a) * 26; }
-}
-function interact() {
-  if (G.mode !== "play") return;
-  if (!G.player.onFoot) { exitCar(); return; }
-  var car = nearestCar(60);
-  if (car) { enterCar(car); return; }
-  if (dist(G.player.x, G.player.y, PLACES.gunshop.x, PLACES.gunshop.y) < 70) {
-    if (G.cash >= 50) {
-      G.cash -= 50; G.ammo += 24;
-      say("Bought 24 rounds for $50. Ammo: " + G.ammo + ".");
-      tone(880, 0.1, "triangle", 0.05);
-    } else say("Not enough cash for ammo — $50 a box.");
-    return;
-  }
-  if (dist(G.player.x, G.player.y, PLACES.safehouse.x, PLACES.safehouse.y) < 70) {
-    saveGame();
-    say("Progress saved at the safehouse.");
-    tone(523, 0.12, "triangle", 0.05);
-    tone(784, 0.2, "triangle", 0.05);
-    return;
-  }
-  if (dist(G.player.x, G.player.y, PLACES.motel.x, PLACES.motel.y) < 70) {
-    say("Lena: \"Reef. About time. We got work.\"");
-    return;
-  }
-}
-function hailTaxi() {
-  if (G.mode !== "play" || G.player.onFoot || G.taxi) return;
-  for (var i = 0; i < G.peds.length; i++) {
-    var p = G.peds[i];
-    if (!p.taxi || p.down) continue;
-    if (dist(G.player.x, G.player.y, p.x, p.y) < 80) {
-      var dest = pickDestination(p.x, p.y);
-      G.taxi = { fare: irnd(40, 90), dx: dest.x, dy: dest.y };
-      p.taxi = false;
-      say("Fare picked up — $" + G.taxi.fare + " to the marked stop.");
-      tone(990, 0.1, "triangle", 0.05);
-      return;
-    }
-  }
-}
-function pickDestination(fx, fy) {
-  var pts = [];
-  for (var i = 0; i < ROADS_X.length; i++) {
-    for (var j = 0; j < ROADS_Y.length; j++) {
-      var x = ROADS_X[i], y = ROADS_Y[j];
-      if (dist(x, y, fx, fy) > 400) pts.push({ x: x, y: y });
-    }
-  }
-  if (pts.length === 0) return { x: 1590, y: 1980 };
-  return pick(pts);
-}
-
-/* ---------------- combat ---------------- */
-function aimWorld() {
-  var cx = G.cam.x, cy = G.cam.y;
-  return { x: cx + (G.aimX - VIEW_W / 2), y: cy + (G.aimY - VIEW_H / 2) };
-}
-function tryShoot() {
-  if (G.mode !== "play") return;
-  if (G.weapon !== 2) return;
-  if (G.shootCd > 0) return;
-  if (G.ammo <= 0) { tone(180, 0.08, "square", 0.04); G.shootCd = 0.25; return; }
-  G.ammo--;
-  G.shootCd = 0.06;
-  var sx = G.player.x, sy = G.player.y;
-  var aim = aimWorld();
-  var a = angTo(sx, sy, aim.x, aim.y);
-  noiseBurst(0.09, 0.14);
-  tone(160, 0.08, "square", 0.06, 60);
-  var hitX = sx + Math.cos(a) * 520, hitY = sy + Math.sin(a) * 520;
-  var best = null, bd = 520;
-  function scan(list, radius, kind) {
-    for (var i = 0; i < list.length; i++) {
-      var o = list[i];
-      if (o.dead) continue;
-      if (o.taxi) continue; /* a waiting fare is never a target */
-      var d = dist(sx, sy, o.x, o.y);
-      if (d > 520 || d < 12) continue;
-      var oa = angTo(sx, sy, o.x, o.y);
-      var da = oa - a;
-      while (da > Math.PI) da -= Math.PI * 2;
-      while (da < -Math.PI) da += Math.PI * 2;
-      if (Math.abs(da) > 0.12) continue;
-      if (d < bd) { bd = d; best = { o: o, kind: kind }; }
-    }
-  }
-  scan(G.cops, 26, "cop");
-  scan(G.copCars, 26, "copcar");
-  scan(G.peds, 22, "ped");
-  scan(G.cars, 26, "car");
-  if (best) {
-    hitX = best.o.x; hitY = best.o.y;
-    damageTarget(best.o, best.kind, 34);
-  }
-  G.tracers.push({ x1: sx, y1: sy, x2: hitX, y2: hitY, t: 0.09 });
-  burst(hitX, hitY, 4, "#ffd166");
-}
-function damageTarget(o, kind, dmg) {
-  if (kind === "cop") {
-    o.hp -= dmg;
-    if (o.hp <= 0) {
-      var idx = G.cops.indexOf(o);
-      if (idx >= 0) G.cops.splice(idx, 1);
-      addHeat(1);
-      say("Cop down. The heat rises.");
-      burst(o.x, o.y, 14, "#ff5a3c");
-      tone(220, 0.2, "sawtooth", 0.05, 60);
-    }
-  } else if (kind === "copcar") {
-    o.hp -= dmg;
-    if (o.hp <= 0 && !o.dead) {
-      o.dead = true; o.speed = 0;
-      addHeat(1);
-      say("PD cruiser wrecked. The heat rises.");
-      burst(o.x, o.y, 26, "#ff7a3c");
-      noiseBurst(0.4, 0.2);
-    }
-  } else if (kind === "ped") {
-    o.down = true; o.downT = 6;
-    burst(o.x, o.y, 8, "#ff8fa3");
-  } else if (kind === "car") {
-    o.hp -= dmg;
-    if (o.hp <= 0 && !o.dead) {
-      o.dead = true; o.speed = 0;
-      burst(o.x, o.y, 22, "#ff7a3c");
-      noiseBurst(0.35, 0.18);
-      if (G.player.car === o) { G.player.car = null; G.player.onFoot = true; }
-    }
-  }
-}
-function punch() {
-  if (G.mode !== "play") return;
-  if (G.punchCd > 0) return;
-  G.punchCd = 0.45;
-  tone(140, 0.08, "square", 0.05, 70);
-  var best = null, bd = 55;
-  for (var i = 0; i < G.cops.length; i++) {
-    var d = dist(G.player.x, G.player.y, G.cops[i].x, G.cops[i].y);
-    if (d < bd) { bd = d; best = G.cops[i]; }
-  }
-  if (best) { damageTarget(best, "cop", 20); burst(best.x, best.y, 6, "#ffffff"); return; }
-  for (var j = 0; j < G.peds.length; j++) {
-    var p = G.peds[j];
-    if (p.down || p.taxi) continue;
-    var dp = dist(G.player.x, G.player.y, p.x, p.y);
-    if (dp < 55) { p.down = true; p.downT = 5; burst(p.x, p.y, 6, "#ffffff"); return; }
-  }
-}
-function burst(x, y, n, color) {
-  for (var i = 0; i < n; i++) {
-    var a = rng() * Math.PI * 2, s = 40 + rng() * 160;
-    G.particles.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, t: 0.5 + rng() * 0.4, color: color });
-  }
-}
-function hurtPlayer(dmg) {
-  if (G.mode !== "play") return;
-  G.health -= dmg;
-  if (G.health <= 0) { G.health = 0; die(); }
-}
-function die() {
-  if (G.mode !== "play") return;
-  G.mode = "wasted";
-  G.mouseDown = false;
-  noiseBurst(0.5, 0.2);
-  tone(110, 0.8, "sawtooth", 0.06, 40);
-  syncOverlays();
-  setTimeout(function () { respawn(); }, 3000);
-}
-function respawn() {
-  G.player.x = HOSPITAL.x; G.player.y = HOSPITAL.y;
-  G.player.onFoot = true; G.player.car = null; G.player.heading = 0;
-  G.health = 100;
-  G.wanted = 0;
-  G.taxi = null;
-  G.cops.length = 0;
-  G.copCars.length = 0;
-  G.cam.x = HOSPITAL.x; G.cam.y = HOSPITAL.y;
-  G.mode = "play";
-  say("Patched up at Palmetto General. The city is still yours.");
-  syncOverlays();
-}
-
-/* ---------------- update: player ---------------- */
-function updatePlayer(dt) {
-  var k = G.keys;
-  var mx = 0, my = 0;
-  if (k["a"] || k["arrowleft"]) mx -= 1;
-  if (k["d"] || k["arrowright"]) mx += 1;
-  if (k["w"] || k["arrowup"]) my -= 1;
-  if (k["s"] || k["arrowdown"]) my += 1;
-  if (G.player.onFoot) {
-    if (mx !== 0 || my !== 0) {
-      var len = Math.sqrt(mx * mx + my * my);
-      var run = (k["shift"]) ? 235 : 150;
-      var nx = G.player.x + (mx / len) * run * dt;
-      var ny = G.player.y + (my / len) * run * dt;
-      moveWithSlide(G.player, nx, ny, 10);
-      G.player.heading = Math.atan2(my, mx);
-    }
-  } else {
-    var car = G.player.car;
-    if (car) {
-      if (k["w"] || k["arrowup"]) car.speed = Math.min(car.top, car.speed + 280 * dt);
-      else if (k["s"] || k["arrowdown"]) car.speed = Math.max(-90, car.speed - 320 * dt);
-      else {
-        if (car.speed > 0) car.speed = Math.max(0, car.speed - 260 * dt);
-        else if (car.speed < 0) car.speed = Math.min(0, car.speed + 260 * dt);
-      }
+    } else if (p.car) {
+      // --- driving ---
+      var c = p.car;
+      if (anyKey(["w", "arrowup"])) c.speed += CAR_ACCEL * dt;
+      else if (anyKey(["s", "arrowdown"])) {
+        if (c.speed > 5) c.speed -= CAR_BRAKE * dt; else c.speed -= CAR_ACCEL * 0.5 * dt;
+      } else c.speed -= c.speed * 0.5 * dt;
+      c.speed = clamp(c.speed, -70, CAR_TOP);
       var steer = 0;
-      if (k["a"] || k["arrowleft"]) steer -= 1;
-      if (k["d"] || k["arrowright"]) steer += 1;
-      var grip = clamp(Math.abs(car.speed) / 60, 0, 1);
-      car.heading += steer * 2.4 * grip * dt * (car.speed < 0 ? -1 : 1);
-      var nx2 = car.x + Math.cos(car.heading) * car.speed * dt;
-      var ny2 = car.y + Math.sin(car.heading) * car.speed * dt;
-      moveWithSlide(car, nx2, ny2, 14);
-      G.player.x = car.x; G.player.y = car.y;
-      G.player.heading = car.heading;
-      if (Math.abs(car.speed) > 40 && Math.random() < 0.3) {
-        G.particles.push({ x: car.x - Math.cos(car.heading) * 16, y: car.y - Math.sin(car.heading) * 16, vx: 0, vy: 0, t: 0.4, color: "#5a5f6a" });
+      if (anyKey(["a", "arrowleft"])) steer -= 1;
+      if (anyKey(["d", "arrowright"])) steer += 1;
+      var sf = clamp(c.speed / 120, -1, 1);
+      c.a += steer * 1.9 * sf * dt;
+      moveWithCollision(c, c.x + Math.cos(c.a) * c.speed * dt, c.y + Math.sin(c.a) * c.speed * dt, 24);
+      p.x = c.x; p.y = c.y; p.a = c.a;
+      if (c.hp <= 0 && !c.dead) { c.dead = true; burst(c.x, c.y, "#ff5d5d", 24); sfx("boom"); exitCar(); }
+    }
+
+    // --- camera follows the player ---
+    cam.x = clamp(p.x, 640, WORLD_W - 640);
+    cam.y = clamp(p.y, 360, WORLD_H - 360);
+
+    // --- traffic ---
+    for (i = 0; i < G.cars.length; i++) {
+      var tc = G.cars[i];
+      if (!tc.ai || tc.parked || tc.dead) continue;
+      tc.turnT -= dt;
+      if (tc.turnT <= 0) {
+        var nxr = nearestLine(tc.x, ROAD_XS), nyr = nearestLine(tc.y, ROAD_YS);
+        if (Math.abs(tc.x - nxr) < 42 && Math.abs(tc.y - nyr) < 42) {
+          if (Math.random() < 0.4) tc.a += (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
+          tc.turnT = rand(2, 5);
+        } else tc.turnT = 0.5;
+      }
+      var tx2 = tc.x + Math.cos(tc.a) * tc.speed * dt;
+      var ty2 = tc.y + Math.sin(tc.a) * tc.speed * dt;
+      if (!onRoad(tx2, ty2) || tx2 < 80 || tx2 > WORLD_W - 80 || ty2 < 80 || ty2 > WORLD_H - 80) {
+        tc.a += Math.PI; tc.turnT = 2;
+      } else { tc.x = tx2; tc.y = ty2; }
+    }
+
+    // --- pedestrians ---
+    for (i = 0; i < G.peds.length; i++) {
+      var pd = G.peds[i];
+      if (pd.dead || pd.taxi) continue;
+      pd.walkT -= dt;
+      if (pd.walkT <= 0) { pd.a = rand(0, Math.PI * 2); pd.walkT = rand(2, 5); }
+      var px2 = pd.x + Math.cos(pd.a) * pd.speed * dt;
+      var py2 = pd.y + Math.sin(pd.a) * pd.speed * dt;
+      if (hitBuilding(px2, py2, 10)) pd.a += Math.PI;
+      else { pd.x = px2; pd.y = py2; }
+      pd.x = clamp(pd.x, 60, WORLD_W - 60); pd.y = clamp(pd.y, 60, WORLD_H - 60);
+    }
+
+    // --- wanted decay and police spawner ---
+    if (G.wanted > 0) {
+      var nearestCop = 1e9, d;
+      for (i = 0; i < G.cops.length; i++) { d = dist(p.x, p.y, G.cops[i].x, G.cops[i].y); if (d < nearestCop) nearestCop = d; }
+      for (i = 0; i < G.copCars.length; i++) { d = dist(p.x, p.y, G.copCars[i].x, G.copCars[i].y); if (d < nearestCop) nearestCop = d; }
+      if (nearestCop > 250) {
+        wantedT += dt;
+        if (wantedT > 25) { wantedT = 0; G.wanted--; if (G.wanted <= 0) { G.wanted = 0; G.cops = []; G.copCars = []; } }
+      } else wantedT = 0;
+      policeT -= dt;
+      if (policeT <= 0) {
+        policeT = 0.5;
+        if (G.copCars.length < G.wanted) spawnCopCar();
+        if (G.cops.length < G.wanted + 1) spawnCop();
       }
     }
-  }
-  /* camera follows the player */
-  G.cam.x = clamp(G.player.x, VIEW_W / 2, WORLD_W - VIEW_W / 2);
-  G.cam.y = clamp(G.player.y, VIEW_H / 2, WORLD_H - VIEW_H / 2);
-}
 
-/* ---------------- update: traffic & peds ---------------- */
-function updateTraffic(dt) {
-  for (var i = 0; i < G.cars.length; i++) {
-    var c = G.cars[i];
-    if (c.dead || c.police || c.parked) continue;
-    if (c === G.player.car) continue;
-    c.aiT -= dt;
-    if (c.axis === "x") {
-      var ahead = null, ad = 70;
-      for (var j = 0; j < G.cars.length; j++) {
-        var o = G.cars[j];
-        if (o === c || o.dead) continue;
-        if (Math.abs(o.y - c.y) < 24 && (o.x - c.x) * c.dir > 0 && (o.x - c.x) * c.dir < ad) { ad = (o.x - c.x) * c.dir; ahead = o; }
-      }
-      var sp = ahead ? Math.min(c.speed, ahead.speed || 60) : 120;
-      c.speed += (sp - c.speed) * Math.min(1, dt * 2);
-      var nx = c.x + c.dir * c.speed * dt;
-      if (nx < 60 || nx > WORLD_W - 60) { c.dir *= -1; c.heading = c.dir > 0 ? 0 : Math.PI; c.lane *= -1; }
-      else {
-        c.x = nx;
-        c.y = c.road + c.lane;
-        var nearX = null;
-        for (var r = 0; r < ROADS_X.length; r++) {
-          if (Math.abs(c.x - ROADS_X[r]) < 14) { nearX = ROADS_X[r]; break; }
+    // --- cop cars chase ---
+    for (i = G.copCars.length - 1; i >= 0; i--) {
+      var cc = G.copCars[i];
+      if (cc.dead) { G.copCars.splice(i, 1); continue; }
+      cc.ramCd -= dt; cc.deployT -= dt;
+      var want = Math.atan2(p.y - cc.y, p.x - cc.x);
+      var diff = want - cc.a;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      cc.a += clamp(diff, -2.4 * dt, 2.4 * dt);
+      cc.speed = Math.min(cc.cruise, cc.speed + 260 * dt);
+      var dc = dist(cc.x, cc.y, p.x, p.y);
+      if (!p.onFoot && dc < 55) {
+        if (cc.ramCd <= 0) {
+          cc.ramCd = 1;
+          if (p.car) {
+            p.car.hp -= 6;
+            burst(p.car.x, p.car.y, "#ffd166", 6);
+            if (p.car.hp <= 0) { p.car.dead = true; burst(p.car.x, p.car.y, "#ff5d5d", 24); sfx("boom"); exitCar(); addHeat(1); }
+          }
         }
-        if (nearX !== null && c.aiT <= 0 && rng() < 0.3) {
-          c.aiT = 1 + rng() * 2;
-          c.axis = "y"; c.road = nearX; c.dir = rng() < 0.5 ? 1 : -1;
-          c.lane = rng() < 0.5 ? -14 : 14;
-          c.heading = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
-          c.x = nearX + c.lane;
+        cc.speed *= 0.6;
+      } else if (p.onFoot && dc < 110) {
+        cc.speed = Math.max(0, cc.speed - 300 * dt);
+        if (cc.deployT <= 0) {
+          cc.deployT = 4;
+          if (G.cops.length < 2) G.cops.push(makeCop(cc.x + 24, cc.y));
         }
       }
-    } else if (c.axis === "y") {
-      var ahead2 = null, ad2 = 70;
-      for (var j2 = 0; j2 < G.cars.length; j2++) {
-        var o2 = G.cars[j2];
-        if (o2 === c || o2.dead) continue;
-        if (Math.abs(o2.x - c.x) < 24 && (o2.y - c.y) * c.dir > 0 && (o2.y - c.y) * c.dir < ad2) { ad2 = (o2.y - c.y) * c.dir; ahead2 = o2; }
-      }
-      var sp2 = ahead2 ? Math.min(c.speed, ahead2.speed || 60) : 120;
-      c.speed += (sp2 - c.speed) * Math.min(1, dt * 2);
-      var ny = c.y + c.dir * c.speed * dt;
-      if (ny < 60 || ny > WORLD_H - 60) { c.dir *= -1; c.heading = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2; c.lane *= -1; }
-      else {
-        c.y = ny;
-        c.x = c.road + c.lane;
-        var nearY = null;
-        for (var r2 = 0; r2 < ROADS_Y.length; r2++) {
-          if (Math.abs(c.y - ROADS_Y[r2]) < 14) { nearY = ROADS_Y[r2]; break; }
-        }
-        if (nearY !== null && c.aiT <= 0 && rng() < 0.3) {
-          c.aiT = 1 + rng() * 2;
-          c.axis = "x"; c.road = nearY; c.dir = rng() < 0.5 ? 1 : -1;
-          c.lane = rng() < 0.5 ? -14 : 14;
-          c.heading = c.dir > 0 ? 0 : Math.PI;
-          c.y = nearY + c.lane;
+      var ox = cc.x, oy = cc.y;
+      moveWithCollision(cc, cc.x + Math.cos(cc.a) * cc.speed * dt, cc.y + Math.sin(cc.a) * cc.speed * dt, 24);
+      if (Math.abs(cc.x - ox) + Math.abs(cc.y - oy) < 0.5 && cc.speed > 40) cc.a += Math.PI / 2;
+    }
+
+    // --- foot cops chase and punch ---
+    for (i = G.cops.length - 1; i >= 0; i--) {
+      var cp = G.cops[i];
+      if (cp.hp <= 0) { G.cops.splice(i, 1); continue; }
+      var dc2 = dist(cp.x, cp.y, p.x, p.y);
+      cp.a = Math.atan2(p.y - cp.y, p.x - cp.x);
+      if (dc2 > 40) {
+        moveWithCollision(cp, cp.x + Math.cos(cp.a) * cp.speed * dt, cp.y + Math.sin(cp.a) * cp.speed * dt, 12);
+      } else {
+        cp.punchT -= dt;
+        if (cp.punchT <= 0) {
+          cp.punchT = 0.7;
+          damagePlayer(1.5);
+          burst(p.x, p.y, "#ff5d5d", 4);
         }
       }
-    }
-  }
-}
-function updatePeds(dt) {
-  for (var i = 0; i < G.peds.length; i++) {
-    var p = G.peds[i];
-    if (p.down) { p.downT -= dt; if (p.downT <= 0) p.down = false; continue; }
-    if (p.taxi) continue; /* the fare ped waits at the stand */
-    if (p.waitT > 0) { p.waitT -= dt; continue; }
-    var d = dist(p.x, p.y, p.tx, p.ty);
-    if (d < 12) {
-      var horiz = rng() < 0.5;
-      if (horiz) { p.tx = clamp(p.x + irnd(-350, 350), 60, WORLD_W - 60); p.ty = pick(ROADS_Y) + irnd(-28, 28); }
-      else { p.tx = pick(ROADS_X) + irnd(-28, 28); p.ty = clamp(p.y + irnd(-350, 350), 60, WORLD_H - 60); }
-      p.waitT = rng() * 2;
-      continue;
-    }
-    var a = angTo(p.x, p.y, p.tx, p.ty);
-    var nx = p.x + Math.cos(a) * p.speed * dt;
-    var ny = p.y + Math.sin(a) * p.speed * dt;
-    if (!blockedAt(nx, ny, 8)) { p.x = nx; p.y = ny; }
-    else { p.tx = p.x; p.ty = p.y; }
-    /* a fast car ploughing through knocks a ped down (no heat — accidents happen) */
-    if (!G.player.onFoot && G.player.car && Math.abs(G.player.car.speed) > 60) {
-      if (dist(p.x, p.y, G.player.x, G.player.y) < 24) {
-        p.down = true; p.downT = 5;
-        burst(p.x, p.y, 8, "#ff8fa3");
-        tone(200, 0.15, "square", 0.05, 90);
-      }
-    }
-  }
-  /* a fresh fare ped appears now and then when none is waiting */
-  var anyFare = false;
-  for (var j = 0; j < G.peds.length; j++) if (G.peds[j].taxi) anyFare = true;
-  if (!anyFare && !G.taxi && rng() < dt * 0.05) {
-    var cands = [];
-    for (var k2 = 0; k2 < G.peds.length; k2++) if (!G.peds[k2].down) cands.push(G.peds[k2]);
-    if (cands.length) { var f = pick(cands); f.taxi = true; f.tx = f.x; f.ty = f.y; }
-  }
-}
-
-/* ---------------- update: police ---------------- */
-function updateCops(dt) {
-  for (var i = G.cops.length - 1; i >= 0; i--) {
-    var c = G.cops[i];
-    c.punchT = (c.punchT || 0) - dt;
-    c.shootT = (c.shootT || 0) - dt;
-    var d = dist(c.x, c.y, G.player.x, G.player.y);
-    if (d > 30) {
-      var a = angTo(c.x, c.y, G.player.x, G.player.y);
-      c.a = a;
-      var sp = c.speed || 150;
-      var nx = c.x + Math.cos(a) * sp * dt;
-      var ny = c.y + Math.sin(a) * sp * dt;
-      moveWithSlide(c, nx, ny, 10);
-      d = dist(c.x, c.y, G.player.x, G.player.y);
-    }
-    if (d < 40) {
-      if (c.punchT <= 0) {
-        c.punchT = 0.9;
-        hurtPlayer(2);
-        tone(120, 0.08, "square", 0.05, 70);
-        burst(G.player.x, G.player.y, 3, "#ffffff");
-      }
-    } else if (d < 220) {
-      if (c.shootT <= 0) {
-        c.shootT = 3;
-        hurtPlayer(1);
-        G.tracers.push({ x1: c.x, y1: c.y, x2: G.player.x, y2: G.player.y, t: 0.08 });
-        noiseBurst(0.06, 0.06);
-      }
-    }
-  }
-}
-function updateCopCars(dt) {
-  for (var i = 0; i < G.copCars.length; i++) {
-    var c = G.copCars[i];
-    if (c.dead) continue;
-    var d = dist(c.x, c.y, G.player.x, G.player.y);
-    var want = angTo(c.x, c.y, G.player.x, G.player.y);
-    c.heading = turnToward(c.heading, want, 3 * dt);
-    var target = d > 110 ? 280 : 0;
-    c.speed += (target - c.speed) * Math.min(1, dt * 1.5);
-    var nx = c.x + Math.cos(c.heading) * c.speed * dt;
-    var ny = c.y + Math.sin(c.heading) * c.speed * dt;
-    moveWithSlide(c, nx, ny, 14);
-  }
-}
-function updatePolice(dt) {
-  if (G.wanted > 0) {
-    G.spawnT -= dt;
-    var wantCars = Math.min(G.wanted, 4);
-    var wantCops = Math.min(G.wanted, 4);
-    if (G.spawnT <= 0) {
-      G.spawnT = 0.35;
-      if (G.copCars.length < wantCars) spawnCopCar();
-      else if (G.cops.length < wantCops) spawnFootCop();
-    }
-    /* wanted fades only while no police can see the player */
-    var seen = false;
-    for (var i = 0; i < G.cops.length; i++) if (dist(G.cops[i].x, G.cops[i].y, G.player.x, G.player.y) < 350) seen = true;
-    for (var j = 0; j < G.copCars.length; j++) if (dist(G.copCars[j].x, G.copCars[j].y, G.player.x, G.player.y) < 350) seen = true;
-    if (seen) G.hideT = 0;
-    else {
-      G.hideT += dt;
-      if (G.hideT > 15) { G.wanted = Math.max(0, G.wanted - 1); G.hideT = 0; say("The heat is cooling off…"); }
-    }
-  } else if (G.cops.length > 0 || G.copCars.length > 0) {
-    G.clearT += dt;
-    if (G.clearT > 1) {
-      G.clearT = 0;
-      if (G.cops.length > 0) G.cops.pop();
-      if (G.copCars.length > 0) G.copCars.pop();
-    }
-  }
-}
-
-/* ---------------- update: missions, taxi, pickups ---------------- */
-function nearPlace(key, r) { return dist(G.player.x, G.player.y, PLACES[key].x, PLACES[key].y) < r; }
-function completeMission() {
-  var m = MISSIONS[G.missionIdx];
-  G.cash += m.payout;
-  say("Job done: " + m.title + "  +$" + m.payout);
-  tone(523, 0.12, "triangle", 0.06);
-  tone(659, 0.12, "triangle", 0.06);
-  tone(784, 0.25, "triangle", 0.06);
-  burst(G.player.x, G.player.y, 20, "#ffd166");
-  G.missionIdx++;
-  G.missionStep = 0;
-  G.holdT = 0; G.holdHeatT = 0;
-  if (G.missionIdx >= MISSIONS.length) say("All six jobs done. Palmetto City is yours, Reef.");
-  else say("Next job: " + MISSIONS[G.missionIdx].title);
-}
-function updateMissions(dt) {
-  var idx = G.missionIdx;
-  if (idx >= MISSIONS.length) return;
-  if (idx === 0) {
-    if (G.missionStep === 0 && G.player.onFoot && nearPlace("motel", 70)) {
-      G.missionStep = 1;
-      say("Lena: \"Steal a parked car, then bring it to my garage.\"");
-    } else if (G.missionStep === 1 && G.carsStolen >= 1) {
-      G.missionStep = 2;
-    } else if (G.missionStep === 2 && !G.player.onFoot && nearPlace("garage", 70)) {
-      completeMission();
-    }
-  } else if (idx === 1) {
-    if (G.missionStep === 0 && G.player.onFoot && nearPlace("docks", 70)) {
-      G.missionStep = 1;
-      say("The docks. Now drive to the Golden Palm Pawn.");
-    } else if (G.missionStep === 1 && !G.player.onFoot && nearPlace("pawn", 70)) {
-      completeMission();
-    }
-  } else if (idx === 2) {
-    if (G.missionStep === 1 && !G.player.onFoot && nearPlace("garage", 70)) {
-      completeMission();
-    }
-  } else if (idx === 3) {
-    if (G.missionStep === 0 && G.wanted === 0 && G.player.onFoot && nearPlace("safehouse", 70)) {
-      completeMission();
-    }
-  } else if (idx === 4) {
-    if (G.missionStep === 0 && G.player.onFoot && nearPlace("park", 70)) {
-      G.missionStep = 1;
-      say("Through the park. Now drive to the Palmetto Mall.");
-    } else if (G.missionStep === 1 && !G.player.onFoot && nearPlace("mall", 70)) {
-      completeMission();
-    }
-  } else if (idx === 5) {
-    if (G.missionStep === 0 && G.player.onFoot && nearPlace("bank", 70)) {
-      G.missionStep = 1;
-      G.holdT = 0; G.holdHeatT = 0;
-      say("Hold the lobby. The PD is coming — stay on your feet.");
-    } else if (G.missionStep === 1) {
-      if (G.player.onFoot && nearPlace("bank", 80)) {
-        G.holdT += dt;
-        G.holdHeatT += dt;
-        if (G.holdHeatT >= 2.5 && G.wanted < 3) { G.holdHeatT = 0; addHeat(1); say("Sirens closing in — hold on!"); }
-        if (G.holdT >= 8) {
-          G.missionStep = 2;
-          say("The vault's open. Get to the safehouse — in a car, fast.");
+      if (dc2 >= 40 && dc2 < 320 && G.wanted >= 4) {
+        cp.shootT -= dt;
+        if (cp.shootT <= 0) {
+          cp.shootT = 2.5;
+          damagePlayer(2);
+          parts.push({ x: cp.x, y: cp.y, vx: 0, vy: 0, life: 0.1, max: 0.1, color: "#ffd166", r: 3 });
         }
-      } else if (G.holdT > 0) {
-        G.holdT = Math.max(0, G.holdT - dt);
+      } else cp.shootT -= dt;
+      if (G.mode !== "play") return; // died mid-update
+    }
+
+    // --- bullets ---
+    for (i = bullets.length - 1; i >= 0; i--) {
+      var b = bullets[i];
+      b.x += Math.cos(b.a) * b.speed * dt;
+      b.y += Math.sin(b.a) * b.speed * dt;
+      b.life -= dt;
+      var gone = b.life <= 0 || b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H;
+      if (!gone) {
+        for (j = 0; j < G.cops.length && !gone; j++) {
+          if (dist(b.x, b.y, G.cops[j].x, G.cops[j].y) < 18) {
+            G.cops[j].hp -= b.dmg; gone = true;
+            if (G.cops[j].hp <= 0) killPedOrCop(G.cops[j]);
+          }
+        }
+        for (j = 0; j < G.copCars.length && !gone; j++) {
+          if (dist(b.x, b.y, G.copCars[j].x, G.copCars[j].y) < 26) {
+            G.copCars[j].hp -= b.dmg; gone = true;
+            if (G.copCars[j].hp <= 0) { G.copCars[j].dead = true; burst(G.copCars[j].x, G.copCars[j].y, "#ff5d5d", 24); sfx("boom"); addHeat(1); }
+          }
+        }
+        for (j = 0; j < G.peds.length && !gone; j++) {
+          var pd2 = G.peds[j];
+          if (!pd2.dead && dist(b.x, b.y, pd2.x, pd2.y) < 14) {
+            pd2.hp -= b.dmg; gone = true;
+            if (pd2.hp <= 0) killPedOrCop(pd2);
+          }
+        }
+        for (j = 0; j < G.cars.length && !gone; j++) {
+          var car2 = G.cars[j];
+          if (!car2.dead && !car2.police && dist(b.x, b.y, car2.x, car2.y) < 26) {
+            car2.hp -= b.dmg; gone = true;
+            if (car2.hp <= 0) { car2.dead = true; burst(car2.x, car2.y, "#ff5d5d", 20); sfx("boom"); }
+          }
+        }
       }
-    } else if (G.missionStep === 2 && !G.player.onFoot && nearPlace("safehouse", 70)) {
-      completeMission();
+      if (gone) bullets.splice(i, 1);
     }
-  }
-}
-function updateTaxi(dt) {
-  if (!G.taxi) return;
-  if (!G.player.onFoot && dist(G.player.x, G.player.y, G.taxi.dx, G.taxi.dy) < 70) {
-    G.cash += G.taxi.fare;
-    say("Fare delivered — +$" + G.taxi.fare + ".");
-    tone(880, 0.12, "triangle", 0.05);
-    tone(1174, 0.2, "triangle", 0.05);
-    G.taxi = null;
-  }
-}
-function updatePackages() {
-  for (var i = 0; i < G.packages.length; i++) {
-    var p = G.packages[i];
-    if (p.got) continue;
-    if (dist(G.player.x, G.player.y, p.x, p.y) < 40) {
-      p.got = true;
-      G.packagesGot++;
-      G.cash += 100;
-      say("Hidden package found — +$100. (" + G.packagesGot + "/10)");
-      tone(1046, 0.12, "triangle", 0.06);
-      tone(1318, 0.2, "triangle", 0.06);
-      burst(p.x, p.y, 16, "#ffd166");
+
+    // --- particles and floaters ---
+    for (i = parts.length - 1; i >= 0; i--) {
+      var pt = parts[i];
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt;
+      if (pt.life <= 0) parts.splice(i, 1);
     }
-  }
-}
-function updateSpray() {
-  if (!G.player.onFoot && G.player.car && G.wanted > 0 && nearPlace("spray", 75)) {
-    G.wanted = 0;
-    G.cash = Math.max(0, G.cash - 100);
-    G.cops.length = 0;
-    G.copCars.length = 0;
-    say("Pay 'n Spray — fresh paint, clean slate. -$100.");
-    tone(392, 0.12, "triangle", 0.05);
-    tone(523, 0.2, "triangle", 0.05);
-    burst(G.player.x, G.player.y, 12, "#7fb069");
-  }
-}
-function updateFx(dt) {
-  for (var i = G.particles.length - 1; i >= 0; i--) {
-    var p = G.particles[i];
-    p.t -= dt;
-    p.x += p.vx * dt; p.y += p.vy * dt;
-    p.vx *= 0.96; p.vy *= 0.96;
-    if (p.t <= 0) G.particles.splice(i, 1);
-  }
-  for (var j = G.tracers.length - 1; j >= 0; j--) {
-    G.tracers[j].t -= dt;
-    if (G.tracers[j].t <= 0) G.tracers.splice(j, 1);
-  }
-  if (G.shootCd > 0) G.shootCd -= dt;
-  if (G.punchCd > 0) G.punchCd -= dt;
-  if (G.msgT > 0) G.msgT -= dt;
-  if (G.mouseDown && G.weapon === 2) tryShoot();
-}
-
-/* ---------------- the main update ---------------- */
-function update(dt) {
-  if (G.mode === "menu") {
-    G.time += dt;
-    G.clock += dt * (24 / 360);
-    if (G.clock >= 24) G.clock -= 24;
-    G.cam.x = 1200 + Math.sin(G.time * 0.05) * 500;
-    G.cam.y = 1200 + Math.cos(G.time * 0.04) * 400;
-    return;
-  }
-  if (G.mode !== "play") return;
-  dt = Math.min(dt, 0.05);
-  if (dt <= 0) dt = 0.016;
-  G.time += dt;
-  G.clock += dt * (24 / 360);
-  if (G.clock >= 24) G.clock -= 24;
-  updatePlayer(dt);
-  updateTraffic(dt);
-  updatePeds(dt);
-  updateCops(dt);
-  updateCopCars(dt);
-  updatePolice(dt);
-  updateMissions(dt);
-  updateTaxi(dt);
-  updatePackages();
-  updateSpray();
-  updateFx(dt);
-  if (G.player.car) {
-    var sp = Math.abs(G.player.car.speed);
-    var note = 50 + sp * 0.5;
-    if (Math.abs(note - G.engineNote) > 12) { G.engineNote = note; }
-  }
-}
-
-/* ---------------- overlays ---------------- */
-function syncOverlays() {
-  try {
-    var menu = document.getElementById("menu");
-    var pause = document.getElementById("pause");
-    var wasted = document.getElementById("wasted");
-    var cont = document.getElementById("btn-continue");
-    if (menu) menu.style.display = G.mode === "menu" ? "flex" : "none";
-    if (pause) pause.style.display = G.mode === "paused" ? "flex" : "none";
-    if (wasted) wasted.style.display = G.mode === "wasted" ? "flex" : "none";
-    if (cont) {
-      if (G.mode === "menu") cont.disabled = !loadSave();
-      else cont.disabled = false;
+    for (i = floaters.length - 1; i >= 0; i--) {
+      floaters[i].y -= 26 * dt; floaters[i].life -= dt;
+      if (floaters[i].life <= 0) floaters.splice(i, 1);
     }
-  } catch (e) {}
-}
-function togglePause() {
-  if (G.mode === "play") { G.mode = "paused"; say(""); }
-  else if (G.mode === "paused") { G.mode = "play"; }
-  syncOverlays();
-}
 
-/* ---------------- render ---------------- */
-function dayFactor() {
-  var h = G.clock;
-  if (h < 6 || h > 18) return 0;
-  return Math.sin((h - 6) / 12 * Math.PI);
-}
-function drawCar(c, isPlayer) {
-  var x = c.x, y = c.y;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(c.heading);
-  ctx.fillStyle = "rgba(0,0,0,0.3)";
-  ctx.fillRect(-20, -10, 42, 22);
-  ctx.fillStyle = c.dead ? "#3a3a3a" : c.color;
-  ctx.fillRect(-19, -11, 38, 22);
-  ctx.fillStyle = "#1c2733";
-  ctx.fillRect(-6, -9, 12, 18);
-  ctx.fillStyle = c.dead ? "#555" : "#cfe8ff";
-  ctx.fillRect(8, -8, 7, 16);
-  if (c.police) {
-    ctx.fillStyle = "#f2f2f2";
-    ctx.fillRect(-19, -11, 10, 22);
-    ctx.fillStyle = (Math.floor(G.time * 4) % 2 === 0) ? "#ff2e4d" : "#2e7bff";
-    ctx.fillRect(-2, -11, 6, 5);
-    ctx.fillStyle = (Math.floor(G.time * 4) % 2 === 0) ? "#2e7bff" : "#ff2e4d";
-    ctx.fillRect(-2, 6, 6, 5);
-  }
-  if (isPlayer) {
-    ctx.strokeStyle = "#ffd166";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(-22, -14, 44, 28);
-  }
-  ctx.restore();
-  if (c.dead) {
-    ctx.fillStyle = "rgba(40,40,40,0.5)";
-    ctx.beginPath(); ctx.arc(x, y, 24, 0, Math.PI * 2); ctx.fill();
-  }
-}
-function render() {
-  if (!ctx || !canvas) return;
-  var W = canvas.width || VIEW_W, H = canvas.height || VIEW_H;
-  var camX = G.cam.x - W / 2, camY = G.cam.y - H / 2;
-  /* ground */
-  ctx.fillStyle = "#7fae62";
-  ctx.fillRect(0, 0, W, H);
-  /* beach + water on the east edge */
-  ctx.fillStyle = "#e8d49a";
-  ctx.fillRect(2290 - camX, 0, 110, H);
-  ctx.fillStyle = "#2e7fa8";
-  ctx.fillRect(2360 - camX, 0, 60, H);
-  /* port concrete at the south edge */
-  ctx.fillStyle = "#8d9299";
-  ctx.fillRect(0, 2025 - camY, W, H - (2025 - camY));
-  /* park */
-  ctx.fillStyle = "#5da24a";
-  ctx.fillRect(900 - camX, 660 - camY, 330, 290);
-  ctx.fillStyle = "#8fce6e";
-  ctx.beginPath(); ctx.arc(980 - camX, 730 - camY, 26, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(1150 - camX, 880 - camY, 30, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(1010 - camX, 900 - camY, 22, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#6db3e8";
-  ctx.beginPath(); ctx.arc(1120 - camX, 740 - camY, 20, 0, Math.PI * 2); ctx.fill();
-  /* airfield runway */
-  ctx.fillStyle = "#5a5f6a";
-  ctx.fillRect(1300 - camX, 40 - camY, 1000, 60);
-  ctx.fillStyle = "#f2f2f2";
-  for (var rx = 1340; rx < 2280; rx += 80) ctx.fillRect(rx - camX, 66 - camY, 40, 6);
-  /* roads */
-  ctx.fillStyle = "#3a3f47";
-  var i, j;
-  for (i = 0; i < ROADS_X.length; i++) ctx.fillRect(ROADS_X[i] - ROAD_HALF - camX, 0, ROAD_HALF * 2, H);
-  for (j = 0; j < ROADS_Y.length; j++) ctx.fillRect(0, ROADS_Y[j] - ROAD_HALF - camY, W, ROAD_HALF * 2);
-  /* road centre dashes */
-  ctx.fillStyle = "#d8c25a";
-  for (i = 0; i < ROADS_X.length; i++) {
-    for (var dy = 20; dy < WORLD_H; dy += 70) ctx.fillRect(ROADS_X[i] - 2 - camX, dy - camY, 4, 30);
-  }
-  for (j = 0; j < ROADS_Y.length; j++) {
-    for (var dx = 20; dx < WORLD_W; dx += 70) ctx.fillRect(dx - camX, ROADS_Y[j] - 2 - camY, 30, 4);
-  }
-  /* docks containers */
-  var contCols = ["#c96f4a", "#4a7fc9", "#7fae62", "#c9a44a"];
-  for (var ci = 0; ci < 8; ci++) {
-    ctx.fillStyle = contCols[ci % 4];
-    ctx.fillRect(120 + ci * 90 - camX, 2100 - camY, 70, 34);
-  }
-  ctx.fillStyle = "#6b7280";
-  ctx.fillRect(900 - camX, 2080 - camY, 300, 20);
-  /* stadium field */
-  ctx.fillStyle = "#4d8f3f";
-  ctx.fillRect(2100 - camX, 1760 - camY, 160, 120);
-  ctx.fillStyle = "#f2f2f2";
-  ctx.fillRect(2176 - camX, 1760 - camY, 4, 120);
-  /* buildings */
-  for (i = 0; i < G.buildings.length; i++) {
-    var b = G.buildings[i];
-    ctx.fillStyle = "rgba(0,0,0,0.25)";
-    ctx.fillRect(b.x + 4 - camX, b.y + 4 - camY, b.w, b.h);
-    ctx.fillStyle = b.color;
-    ctx.fillRect(b.x - camX, b.y - camY, b.w, b.h);
-    ctx.fillStyle = "rgba(255,255,255,0.25)";
-    ctx.fillRect(b.x - camX, b.y - camY, b.w, 6);
-    ctx.fillStyle = "rgba(20,30,50,0.55)";
-    var wx, wy;
-    for (wx = b.x + 10; wx < b.x + b.w - 12; wx += 24) {
-      for (wy = b.y + 12; wy < b.y + b.h - 12; wy += 24) {
-        ctx.fillRect(wx - camX, wy - camY, 10, 12);
+    // --- packages (on foot only) ---
+    if (p.onFoot) {
+      for (i = 0; i < packages.length; i++) {
+        var pk = packages[i];
+        if (!pk.got && dist(p.x, p.y, pk.x, pk.y) < 40) {
+          pk.got = true; G.packagesGot++; G.cash += 100;
+          floaters.push({ x: pk.x, y: pk.y - 10, text: "+$100 PACKAGE", life: 1.6, color: "#7dff9b" });
+          sfx("pickup");
+        }
       }
     }
-    if (b.label) {
-      ctx.fillStyle = "#20242c";
-      ctx.font = "bold 13px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(b.label, b.x + b.w / 2 - camX, b.y + b.h / 2 + 5 - camY);
-      ctx.textAlign = "left";
+
+    // --- taxi delivery ---
+    if (G.taxi && dist(p.x, p.y, G.taxi.dx, G.taxi.dy) < 60) {
+      var fare = G.taxi.fare;
+      G.cash += fare;
+      floaters.push({ x: p.x, y: p.y - 30, text: "+$" + fare + " FARE", life: 1.6, color: "#7dff9b" });
+      G.taxi = null;
+      sfx("cash");
     }
-  }
-  /* place signs */
-  ctx.fillStyle = "#20242c";
-  ctx.font = "bold 12px sans-serif";
-  var signs = [["Sunset Motel", 290, 400], ["Reef Garage", 550, 400], ["Ironclad Guns", 1070, 400], ["Pay 'n Spray", 1590, 400], ["Palmetto Docks", 290, 1960], ["Golden Palm Pawn", 550, 1180], ["First Palmetto Bank", 1330, 1180], ["Hibiscus Park", 1070, 790], ["Palmetto Mall", 1590, 1960], ["Palmetto Bowl", 1990, 1740], ["Safehouse", 2110, 660]];
-  for (i = 0; i < signs.length; i++) ctx.fillText(signs[i][0], signs[i][1] - camX - 40, signs[i][2] - camY);
-  /* hidden packages */
-  for (i = 0; i < G.packages.length; i++) {
-    var p = G.packages[i];
-    if (p.got) continue;
-    var bob = Math.sin(G.time * 3 + p.bob) * 3;
-    ctx.fillStyle = "#ffd166";
-    ctx.fillRect(p.x - 9 - camX, p.y - 9 + bob - camY, 18, 18);
-    ctx.fillStyle = "#ff5a3c";
-    ctx.fillRect(p.x - 9 - camX, p.y - 3 + bob - camY, 18, 5);
-  }
-  /* peds */
-  for (i = 0; i < G.peds.length; i++) {
-    var pd = G.peds[i];
-    var px = pd.x - camX, py = pd.y - camY;
-    if (pd.down) {
-      ctx.fillStyle = "#8a6d3b";
-      ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.fill();
-      continue;
+
+    // --- Pay 'n Spray ---
+    if (!p.onFoot && G.wanted > 0 && p.car && dist(p.car.x, p.car.y, PLACES.spray.x, PLACES.spray.y) < 70) {
+      G.wanted = 0; G.cash -= 100; G.cops = []; G.copCars = [];
+      setMsg("Pay 'n Spray: fresh paint, clean slate. -$100.");
+      sfx("cash");
     }
-    ctx.fillStyle = pd.color;
-    ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#f2c9a0";
-    ctx.beginPath(); ctx.arc(px, py - 2, 4, 0, Math.PI * 2); ctx.fill();
-    if (pd.taxi) {
-      ctx.fillStyle = "#ffd166";
-      ctx.font = "bold 11px sans-serif";
-      ctx.fillText("TAXI $", px - 16, py - 14);
+
+    if (G.mode === "play") updateMission(dt);
+    if (G.mode === "play") syncHud();
+  }
+
+  // ---------- HUD ----------
+  function syncHud() {
+    if (!G) return;
+    var hf = el("health-fill");
+    if (hf) hf.style.width = Math.max(0, Math.round(G.health)) + "%";
+    setText("cash", String(G.cash));
+    var stars = "";
+    for (var i = 0; i < 5; i++) stars += i < G.wanted ? "\u2605" : "\u2606";
+    setText("stars", stars);
+    setText("weapon", G.weapon === 2 ? "PISTOL \u00b7 " + G.ammo + " RDS" : "FISTS");
+    var hh = Math.floor(timeMin / 60), mm = Math.floor(timeMin % 60);
+    setText("clock", (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm);
+    setText("speed", (!G.player.onFoot && G.player.car) ? Math.round(Math.abs(G.player.car.speed) * 0.6) + " MPH" : "");
+    setText("mission-title", G.missionIdx < 6 ? MISSIONS[G.missionIdx].title : "PALMETTO HEAT — COMPLETE");
+    setText("msg", msgText);
+  }
+
+  // ---------- render ----------
+  function missionTarget() {
+    var idx = G.missionIdx, st = G.missionStep;
+    if (idx === 0) return st === 0 ? PLACES.motel : (st === 1 ? null : PLACES.garage);
+    if (idx === 1) return st === 0 ? PLACES.docks : PLACES.pawn;
+    if (idx === 2) return st === 0 ? PLACES.stadium : PLACES.garage;
+    if (idx === 3) return PLACES.safehouse;
+    if (idx === 4) return st === 0 ? PLACES.park : PLACES.mall;
+    if (idx === 5) return st === 2 ? PLACES.safehouse : PLACES.bank;
+    return null;
+  }
+  function render() {
+    var canvas = el("game");
+    if (!canvas || !canvas.getContext) return;
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    var W = canvas.width || 1280, H = canvas.height || 720;
+    var vx = cam.x - W / 2, vy = cam.y - H / 2;
+    var i, j;
+    // Ground: sun-soaked grass, beach and bay at the south edge.
+    ctx.fillStyle = "#5d8a46"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#e0c98f"; ctx.fillRect(0, 2240 - vy, W, 90);
+    ctx.fillStyle = "#2f6f8f"; ctx.fillRect(0, 2330 - vy, W, 70);
+    // City blocks.
+    for (i = 0; i < ROAD_XS.length - 1; i++) {
+      for (j = 0; j < ROAD_YS.length - 1; j++) {
+        var bx = ROAD_XS[i] + ROAD_HALF, by = ROAD_YS[j] + ROAD_HALF;
+        var bw = ROAD_XS[i + 1] - ROAD_XS[i] - 2 * ROAD_HALF;
+        var bh = ROAD_YS[j + 1] - ROAD_YS[j] - 2 * ROAD_HALF;
+        ctx.fillStyle = ((i + j) % 2 === 0) ? "#7d7468" : "#766d61";
+        ctx.fillRect(bx - vx, by - vy, bw, bh);
+      }
     }
-  }
-  /* cars */
-  for (i = 0; i < G.cars.length; i++) drawCar(G.cars[i], G.player.car === G.cars[i]);
-  for (i = 0; i < G.copCars.length; i++) drawCar(G.copCars[i], false);
-  /* foot cops */
-  for (i = 0; i < G.cops.length; i++) {
-    var cp = G.cops[i];
-    ctx.fillStyle = "#20242c";
-    ctx.beginPath(); ctx.arc(cp.x - camX, cp.y - camY, 9, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#2e7bff";
-    ctx.beginPath(); ctx.arc(cp.x - camX, cp.y - camY - 2, 5, 0, Math.PI * 2); ctx.fill();
-  }
-  /* player on foot */
-  if (G.player.onFoot) {
-    var ux = G.player.x - camX, uy = G.player.y - camY;
-    ctx.fillStyle = "rgba(0,0,0,0.3)";
-    ctx.beginPath(); ctx.arc(ux, uy + 3, 10, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#14b8a6";
-    ctx.beginPath(); ctx.arc(ux, uy, 9, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#f2c9a0";
-    ctx.beginPath(); ctx.arc(ux, uy - 2, 5, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#ffd166";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(ux, uy);
-    ctx.lineTo(ux + Math.cos(G.player.heading) * 16, uy + Math.sin(G.player.heading) * 16);
-    ctx.stroke();
-  }
-  /* tracers + particles */
-  for (i = 0; i < G.tracers.length; i++) {
-    var t = G.tracers[i];
-    ctx.strokeStyle = "#ffe066";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(t.x1 - camX, t.y1 - camY);
-    ctx.lineTo(t.x2 - camX, t.y2 - camY);
-    ctx.stroke();
-  }
-  for (i = 0; i < G.particles.length; i++) {
-    var pt = G.particles[i];
-    ctx.fillStyle = pt.color;
-    ctx.fillRect(pt.x - 3 - camX, pt.y - 3 - camY, 6, 6);
-  }
-  /* mission marker */
-  if (G.missionIdx < MISSIONS.length) {
-    var target = missionTarget();
-    if (target) {
-      var tx = target.x - camX, ty = target.y - camY;
-      var pulse = 14 + Math.sin(G.time * 5) * 4;
-      ctx.strokeStyle = "#ffd166";
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(tx, ty, pulse, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = "#ffd166";
-      ctx.beginPath(); ctx.arc(tx, ty, 5, 0, Math.PI * 2); ctx.fill();
+    // Park stays green with trees.
+    ctx.fillStyle = "#4c8a3f";
+    ctx.fillRect(985 - vx, 725 - vy, 170, 170);
+    ctx.fillStyle = "#2f6b2a";
+    var treeSpots = [[1010, 750], [1080, 740], [1130, 800], [1020, 860], [1100, 870], [1060, 790]];
+    for (i = 0; i < treeSpots.length; i++) { ctx.beginPath(); ctx.arc(treeSpots[i][0] - vx, treeSpots[i][1] - vy, 14, 0, Math.PI * 2); ctx.fill(); }
+    // Roads.
+    ctx.fillStyle = "#33363b";
+    for (i = 0; i < ROAD_XS.length; i++) ctx.fillRect(ROAD_XS[i] - ROAD_HALF - vx, 0 - vy, ROAD_HALF * 2, WORLD_H);
+    for (i = 0; i < ROAD_YS.length; i++) ctx.fillRect(0 - vx, ROAD_YS[i] - ROAD_HALF - vy, WORLD_W, ROAD_HALF * 2);
+    // Lane dashes.
+    ctx.fillStyle = "#d8c25a";
+    for (i = 0; i < ROAD_XS.length; i++) {
+      for (var y = 0; y < WORLD_H; y += 90) ctx.fillRect(ROAD_XS[i] - 2 - vx, y - vy, 4, 44);
     }
-  }
-  /* day / night tint */
-  var df = dayFactor();
-  if (df < 1) {
-    ctx.fillStyle = "rgba(12,22,64," + ((1 - df) * 0.28).toFixed(3) + ")";
-    ctx.fillRect(0, 0, W, H);
-  }
-  if (G.mode === "play" || G.mode === "paused" || G.mode === "wasted") drawHud(W, H);
-  syncOverlays();
-}
-function missionTarget() {
-  var idx = G.missionIdx, s = G.missionStep;
-  if (idx === 0) {
-    if (s === 0) return PLACES.motel;
-    if (s === 1) {
-      for (var i = 0; i < G.cars.length; i++) if (G.cars[i].parked) return { x: G.cars[i].x, y: G.cars[i].y };
-      return PLACES.garage;
+    for (i = 0; i < ROAD_YS.length; i++) {
+      for (var x = 0; x < WORLD_W; x += 90) ctx.fillRect(x - vx, ROAD_YS[i] - 2 - vy, 44, 4);
     }
-    return PLACES.garage;
-  }
-  if (idx === 1) return s === 0 ? PLACES.docks : PLACES.pawn;
-  if (idx === 2) return s === 0 ? { x: 2100, y: 1760 } : PLACES.garage;
-  if (idx === 3) return PLACES.safehouse;
-  if (idx === 4) return s === 0 ? PLACES.park : PLACES.mall;
-  if (idx === 5) {
-    if (s === 0) return PLACES.bank;
-    if (s === 1) return PLACES.bank;
-    return PLACES.safehouse;
-  }
-  return null;
-}
-function drawHud(W, H) {
-  ctx.textAlign = "left";
-  /* top-left status panel */
-  ctx.fillStyle = "rgba(8,12,20,0.72)";
-  ctx.fillRect(12, 12, 250, 96);
-  ctx.fillStyle = "#f2ede3";
-  ctx.font = "bold 17px sans-serif";
-  ctx.fillText("PALMETTO HEAT", 24, 34);
-  ctx.font = "14px sans-serif";
-  ctx.fillText("Cash  $" + G.cash, 24, 56);
-  /* health bar */
-  ctx.fillStyle = "#3a0d0d";
-  ctx.fillRect(24, 64, 150, 12);
-  ctx.fillStyle = G.health > 30 ? "#37c978" : "#ff2e4d";
-  ctx.fillRect(24, 64, 150 * clamp(G.health / 100, 0, 1), 12);
-  ctx.fillStyle = "#f2ede3";
-  ctx.fillText(Math.round(G.health) + "", 182, 75);
-  /* wanted stars */
-  var stars = "";
-  for (var s = 0; s < 5; s++) stars += s < G.wanted ? "★" : "☆";
-  ctx.fillStyle = "#ffb042";
-  ctx.font = "bold 18px sans-serif";
-  ctx.fillText(stars, 24, 98);
-  /* weapon + clock */
-  ctx.fillStyle = "#f2ede3";
-  ctx.font = "14px sans-serif";
-  ctx.fillText((G.weapon === 2 ? "PISTOL " + G.ammo : "FISTS"), 24, 122 - 14);
-  var hh = Math.floor(G.clock), mm = Math.floor((G.clock - hh) * 60);
-  ctx.fillText((hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm, 200, 108);
-  /* mission line */
-  if (G.missionIdx < MISSIONS.length) {
-    var m = MISSIONS[G.missionIdx];
-    ctx.fillStyle = "rgba(8,12,20,0.72)";
-    ctx.fillRect(12, H - 62, 560, 50);
-    ctx.fillStyle = "#ffd166";
-    ctx.font = "bold 15px sans-serif";
-    ctx.fillText("JOB " + (G.missionIdx + 1) + "/6 — " + m.title + "  ($" + m.payout + ")", 24, H - 40);
-    ctx.fillStyle = "#f2ede3";
-    ctx.font = "13px sans-serif";
-    ctx.fillText(m.desc, 24, H - 20);
-  } else {
-    ctx.fillStyle = "rgba(8,12,20,0.72)";
-    ctx.fillRect(12, H - 62, 560, 50);
-    ctx.fillStyle = "#ffd166";
-    ctx.font = "bold 15px sans-serif";
-    ctx.fillText("ALL JOBS DONE — Palmetto City is yours.", 24, H - 30);
-  }
-  /* speed + car */
-  if (!G.player.onFoot && G.player.car) {
-    ctx.fillStyle = "rgba(8,12,20,0.72)";
-    ctx.fillRect(W - 232, H - 62, 220, 50);
-    ctx.fillStyle = "#f2ede3";
-    ctx.font = "bold 20px sans-serif";
-    ctx.fillText(Math.round(Math.abs(G.player.car.speed) * 0.55) + " mph", W - 220, H - 40);
-    ctx.font = "13px sans-serif";
-    ctx.fillText(G.player.car.model.name, W - 220, H - 20);
-  }
-  /* taxi line */
-  if (G.taxi) {
-    ctx.fillStyle = "rgba(8,12,20,0.72)";
-    ctx.fillRect(W / 2 - 130, 12, 260, 30);
-    ctx.fillStyle = "#ffd166";
-    ctx.font = "bold 14px sans-serif";
-    ctx.fillText("TAXI FARE $" + G.taxi.fare + " — follow the marker", W / 2 - 118, 32);
-  }
-  /* transient message */
-  if (G.msgT > 0 && G.msg) {
-    ctx.fillStyle = "rgba(8,12,20,0.78)";
-    var mw = 20 + G.msg.length * 7.5;
-    ctx.fillRect(W / 2 - mw / 2, 52, mw, 30);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 14px sans-serif";
+    // Buildings.
+    for (i = 0; i < BUILDINGS.length; i++) {
+      var b = BUILDINGS[i];
+      ctx.fillStyle = b.color;
+      ctx.fillRect(b.x - vx, b.y - vy, b.w, b.h);
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      ctx.fillRect(b.x - vx, b.y - vy, b.w, 8);
+      ctx.fillRect(b.x - vx, b.y - vy, 8, b.h);
+      if (b.label) {
+        ctx.fillStyle = "#ffffff"; ctx.font = "bold 13px sans-serif"; ctx.textAlign = "center";
+        ctx.fillText(b.label, b.x + b.w / 2 - vx, b.y + b.h / 2 - vy + 5);
+      }
+    }
+    // Place markers.
     ctx.textAlign = "center";
-    ctx.fillText(G.msg, W / 2, 72);
-    ctx.textAlign = "left";
-  }
-  drawMinimap(W, H);
-}
-function drawMinimap(W, H) {
-  var cx = W - 92, cy = 92, r = 72, scale = (r * 2) / WORLD_W;
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.clip();
-  ctx.fillStyle = "rgba(10,16,26,0.85)";
-  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-  ctx.strokeStyle = "#5a6472";
-  ctx.lineWidth = 2;
-  var i;
-  for (i = 0; i < ROADS_X.length; i++) {
-    ctx.beginPath();
-    ctx.moveTo(cx - r + ROADS_X[i] * scale, cy - r);
-    ctx.lineTo(cx - r + ROADS_X[i] * scale, cy + r);
-    ctx.stroke();
-  }
-  for (i = 0; i < ROADS_Y.length; i++) {
-    ctx.beginPath();
-    ctx.moveTo(cx - r, cy - r + ROADS_Y[i] * scale);
-    ctx.lineTo(cx + r, cy - r + ROADS_Y[i] * scale);
-    ctx.stroke();
-  }
-  function dot(wx, wy, color, rad) {
-    var mx = cx - r + wx * scale, my = cy - r + wy * scale;
-    var ddx = mx - cx, ddy = my - cy;
-    var dd = Math.sqrt(ddx * ddx + ddy * ddy);
-    if (dd > r - 4) { mx = cx + ddx / dd * (r - 4); my = cy + ddy / dd * (r - 4); }
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(mx, my, rad, 0, Math.PI * 2); ctx.fill();
-  }
-  for (i = 0; i < G.packages.length; i++) if (!G.packages[i].got) dot(G.packages[i].x, G.packages[i].y, "#ffd166", 2);
-  for (i = 0; i < G.copCars.length; i++) dot(G.copCars[i].x, G.copCars[i].y, "#2e7bff", 4);
-  for (i = 0; i < G.cops.length; i++) dot(G.cops[i].x, G.cops[i].y, "#ff2e4d", 3);
-  var tgt = G.taxi ? { x: G.taxi.dx, y: G.taxi.dy } : missionTarget();
-  if (tgt) dot(tgt.x, tgt.y, "#ffd166", 5);
-  dot(G.player.x, G.player.y, "#ffffff", 4);
-  ctx.restore();
-  ctx.strokeStyle = "#ffb042";
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-}
-
-/* ---------------- input ---------------- */
-function bindInput() {
-  try {
-    window.addEventListener("keydown", function (e) {
-      var k = (e.key || "").toLowerCase();
-      G.keys[k] = true;
-      if (e.repeat) return;
-      if (k === "e") interact();
-      else if (k === " ") { punch(); if (e.preventDefault) e.preventDefault(); }
-      else if (k === "1") G.weapon = 1;
-      else if (k === "2") G.weapon = 2;
-      else if (k === "t") hailTaxi();
-      else if (k === "m") { G.musicOn = !G.musicOn; say(G.musicOn ? "Music on." : "Music off."); }
-      else if (k === "escape" || k === "p") togglePause();
-      else if (k === "enter" && G.mode === "menu") startGame(false);
-    });
-    window.addEventListener("keyup", function (e) {
-      G.keys[(e.key || "").toLowerCase()] = false;
-    });
-    window.addEventListener("mousemove", function (e) {
-      G.aimX = (typeof e.clientX === "number") ? e.clientX : VIEW_W / 2;
-      G.aimY = (typeof e.clientY === "number") ? e.clientY : VIEW_H / 2;
-    });
-    window.addEventListener("mousedown", function (e) {
-      if (e.target && e.target.id === "game") {
-        G.mouseDown = true;
-        tryShoot();
+    var placeKeys = Object.keys(PLACES);
+    for (i = 0; i < placeKeys.length; i++) {
+      var pl = PLACES[placeKeys[i]];
+      ctx.fillStyle = "#ff9f1c";
+      ctx.beginPath(); ctx.arc(pl.x - vx, pl.y - vy, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#1a1206"; ctx.font = "bold 11px sans-serif";
+      ctx.fillText("\u2605", pl.x - vx, pl.y - vy + 4);
+      ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.font = "12px sans-serif";
+      ctx.fillText(pl.label, pl.x - vx, pl.y + 24 - vy);
+    }
+    // Hidden packages.
+    for (i = 0; i < packages.length; i++) {
+      var pk = packages[i];
+      if (pk.got) continue;
+      var pulse = 8 + 3 * Math.sin(timeMin * 2 + i);
+      ctx.fillStyle = "#7dff9b";
+      ctx.save(); ctx.translate(pk.x - vx, pk.y - vy); ctx.rotate(Math.PI / 4);
+      ctx.fillRect(-pulse / 2, -pulse / 2, pulse, pulse);
+      ctx.restore();
+    }
+    // Pedestrians.
+    for (i = 0; i < G.peds.length; i++) {
+      var pd = G.peds[i];
+      if (pd.dead) continue;
+      ctx.fillStyle = pd.taxi ? "#ffd166" : pd.hue;
+      ctx.beginPath(); ctx.arc(pd.x - vx, pd.y - vy, pd.taxi ? 9 : 7, 0, Math.PI * 2); ctx.fill();
+      if (pd.taxi) {
+        ctx.fillStyle = "#1a1206"; ctx.font = "bold 10px sans-serif";
+        ctx.fillText("$", pd.x - vx, pd.y - vy + 3);
       }
-    });
-    window.addEventListener("mouseup", function () { G.mouseDown = false; });
-  } catch (e) {}
-  try {
-    var nb = document.getElementById("btn-new");
-    var cb = document.getElementById("btn-continue");
-    if (nb) nb.addEventListener("click", function () { startGame(false); });
-    if (cb) cb.addEventListener("click", function () { startGame(true); });
-  } catch (e) {}
-}
+    }
+    // Traffic and parked cars.
+    for (i = 0; i < G.cars.length; i++) drawCar(ctx, G.cars[i], vx, vy, false);
+    for (i = 0; i < G.copCars.length; i++) drawCar(ctx, G.copCars[i], vx, vy, true);
+    // Foot cops.
+    for (i = 0; i < G.cops.length; i++) {
+      var cp = G.cops[i];
+      ctx.fillStyle = "#2b4fd8";
+      ctx.beginPath(); ctx.arc(cp.x - vx, cp.y - vy, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath(); ctx.arc(cp.x - vx, cp.y - vy, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    // Bullets and particles.
+    ctx.fillStyle = "#ffd166";
+    for (i = 0; i < bullets.length; i++) { ctx.beginPath(); ctx.arc(bullets[i].x - vx, bullets[i].y - vy, 3, 0, Math.PI * 2); ctx.fill(); }
+    for (i = 0; i < parts.length; i++) {
+      var pt = parts[i];
+      ctx.fillStyle = pt.color;
+      ctx.globalAlpha = Math.max(0, pt.life / pt.max);
+      ctx.beginPath(); ctx.arc(pt.x - vx, pt.y - vy, pt.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Player.
+    var p = G.player;
+    if (p.onFoot) {
+      ctx.fillStyle = "#ff5d5d";
+      ctx.beginPath(); ctx.arc(p.x - vx, p.y - vy, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath(); ctx.arc(p.x + Math.cos(p.a) * 7 - vx, p.y + Math.sin(p.a) * 7 - vy, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x - vx, p.y - vy, 15, 0, Math.PI * 2); ctx.stroke();
+    } else if (p.car) {
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(p.car.x - vx, p.car.y - vy, 34, 0, Math.PI * 2); ctx.stroke();
+    }
+    // Mission beacon.
+    var tgt = missionTarget();
+    if (tgt) {
+      var bob = 6 * Math.sin(timeMin * 3);
+      ctx.fillStyle = "rgba(255, 209, 102, 0.25)";
+      ctx.fillRect(tgt.x - 3 - vx, tgt.y - 160 - vy, 6, 160);
+      ctx.fillStyle = "#ffd166";
+      ctx.save(); ctx.translate(tgt.x - vx, tgt.y - 30 + bob - vy); ctx.rotate(Math.PI / 4);
+      ctx.fillRect(-11, -11, 22, 22);
+      ctx.restore();
+      ctx.fillStyle = "#1a1206"; ctx.font = "bold 13px sans-serif";
+      ctx.fillText("!", tgt.x - vx, tgt.y - 24 + bob - vy);
+    }
+    // Floaters.
+    ctx.font = "bold 15px sans-serif"; ctx.textAlign = "center";
+    for (i = 0; i < floaters.length; i++) {
+      ctx.fillStyle = floaters[i].color;
+      ctx.fillText(floaters[i].text, floaters[i].x - vx, floaters[i].y - vy);
+    }
+    // Day / night tint.
+    var hour = timeMin / 60;
+    var night = (hour >= 20 || hour < 5) ? 0.34 : (hour >= 18 || hour < 7 ? 0.16 : 0);
+    if (night > 0) { ctx.fillStyle = "rgba(8,14,44," + night + ")"; ctx.fillRect(0, 0, W, H); }
+    else if (hour >= 17 && hour < 19) { ctx.fillStyle = "rgba(255,120,40,0.10)"; ctx.fillRect(0, 0, W, H); }
+    // Minimap.
+    drawMinimap(ctx, W, H, tgt);
+    // Wasted / paused tint is DOM; nothing more on canvas.
+    if (G.mode === "menu") {
+      ctx.fillStyle = "rgba(5,8,12,0.25)"; ctx.fillRect(0, 0, W, H);
+    }
+  }
+  function drawCar(ctx, c, vx, vy, police) {
+    var x = c.x - vx, y = c.y - vy;
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(c.a);
+    ctx.fillStyle = c.dead ? "#222222" : c.model.color;
+    ctx.fillRect(-c.model.w / 2, -c.model.h / 2, c.model.w, c.model.h);
+    ctx.fillStyle = "rgba(180,220,255,0.85)";
+    ctx.fillRect(-c.model.w / 2 + 8, -c.model.h / 2 + 4, 12, c.model.h - 8);
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fillRect(c.model.w / 2 - 10, -c.model.h / 2 + 3, 6, c.model.h - 6);
+    if (police) {
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(-6, -c.model.h / 2, 12, c.model.h);
+      ctx.fillStyle = "#ff2d2d"; ctx.fillRect(-14, -c.model.h / 2 - 3, 10, 6);
+      ctx.fillStyle = "#2b6bff"; ctx.fillRect(4, -c.model.h / 2 - 3, 10, 6);
+    }
+    if (c.dead) {
+      ctx.fillStyle = "rgba(120,120,120,0.6)";
+      ctx.beginPath(); ctx.arc(0, -c.model.h, 8, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+    if (!c.parked && !c.dead && !police) {
+      // headlights
+      ctx.fillStyle = "rgba(255,240,180,0.5)";
+      ctx.beginPath(); ctx.arc(x + Math.cos(c.a) * (c.model.w / 2 + 6), y + Math.sin(c.a) * (c.model.w / 2 + 6), 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  function drawMinimap(ctx, W, H, tgt) {
+    var cx = W - 112, cy = 112, r = 88, sc = (r * 2) / WORLD_W;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = "#16241a"; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    ctx.strokeStyle = "#3d4a3d"; ctx.lineWidth = 1;
+    var i;
+    for (i = 0; i < ROAD_XS.length; i++) { ctx.beginPath(); ctx.moveTo(cx - r + ROAD_XS[i] * sc, cy - r); ctx.lineTo(cx - r + ROAD_XS[i] * sc, cy + r); ctx.stroke(); }
+    for (i = 0; i < ROAD_YS.length; i++) { ctx.beginPath(); ctx.moveTo(cx - r, cy - r + ROAD_YS[i] * sc); ctx.lineTo(cx + r, cy - r + ROAD_YS[i] * sc); ctx.stroke(); }
+    ctx.fillStyle = "#7dff9b";
+    for (i = 0; i < packages.length; i++) if (!packages[i].got) ctx.fillRect(cx - r + packages[i].x * sc - 2, cy - r + packages[i].y * sc - 2, 4, 4);
+    if (tgt) {
+      ctx.fillStyle = "#ffd166";
+      ctx.beginPath(); ctx.arc(cx - r + tgt.x * sc, cy - r + tgt.y * sc, 6, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = "#ff5d5d";
+    for (i = 0; i < G.cops.length; i++) { ctx.beginPath(); ctx.arc(cx - r + G.cops[i].x * sc, cy - r + G.cops[i].y * sc, 3, 0, Math.PI * 2); ctx.fill(); }
+    for (i = 0; i < G.copCars.length; i++) { ctx.beginPath(); ctx.arc(cx - r + G.copCars[i].x * sc, cy - r + G.copCars[i].y * sc, 4, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(cx - r + G.player.x * sc, cy - r + G.player.y * sc, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  }
 
-/* ---------------- boot ---------------- */
-buildWorld();
-spawnTraffic();
-spawnPeds();
-bindInput();
-syncOverlays();
-var lastT = 0;
-function loop(t) {
+  // ---------- main loop ----------
+  var lastT = 0;
+  function loop(t) {
+    try { requestAnimationFrame(loop); } catch (e) {}
+    var now = 0;
+    try { now = performance.now(); } catch (e) { now = lastT + 16; }
+    var dt = (now - lastT) / 1000;
+    lastT = now;
+    if (dt > 0.05) dt = 0.05;
+    if (dt <= 0) dt = 0.016;
+    if (G.mode === "play") update(dt);
+    try { render(); } catch (e) {}
+  }
+
+  // ---------- wiring ----------
+  function wireButton(id, fn) {
+    var b = el(id);
+    if (b && b.addEventListener) b.addEventListener("click", fn);
+  }
+  wireButton("btn-new", function () { startGame(false); });
+  wireButton("btn-continue", function () { startGame(true); });
+  wireButton("btn-resume", function () { if (G.mode === "paused") togglePause(); });
+  (function initContinue() {
+    var b = el("btn-continue");
+    if (b && !loadSave()) {
+      try { b.disabled = true; b.style.opacity = "0.45"; } catch (e) {}
+    }
+  })();
+
+  // ---------- debug hook for the acceptance tests ----------
+  window.__PALMETTO = {
+    G: G, MISSIONS: MISSIONS,
+    startGame: startGame, update: update, render: render,
+    addHeat: addHeat, saveGame: saveGame, loadSave: loadSave
+  };
+
+  spawnWorld();
+  try { lastT = performance.now(); } catch (e) { lastT = 0; }
   try { requestAnimationFrame(loop); } catch (e) {}
-  var now = (typeof t === "number") ? t : 0;
-  if (!now && typeof performance !== "undefined" && performance.now) { try { now = performance.now(); } catch (e) { now = 0; } }
-  var dt = lastT ? (now - lastT) / 1000 : 0.016;
-  lastT = now;
-  if (dt > 0.05) dt = 0.05;
-  if (dt <= 0) dt = 0.016;
-  try { update(dt); } catch (e) {}
-  try { render(); } catch (e) {}
-}
-try { requestAnimationFrame(loop); } catch (e) {}
-
-/* ---------------- debug hook (used by the acceptance tests) ---------------- */
-window.__PALMETTO = {
-  G: G,
-  MISSIONS: MISSIONS,
-  startGame: startGame,
-  update: update,
-  render: render,
-  addHeat: addHeat,
-  saveGame: saveGame,
-  loadSave: loadSave
-};
-
+  render();
 })();

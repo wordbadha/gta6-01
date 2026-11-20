@@ -1,85 +1,37 @@
-/* Palmetto Heat — page styling. Dark, sun-bleached, game-like. */
 * { box-sizing: border-box; }
-html, body {
-  margin: 0;
-  padding: 0;
-  background: #0b0e14;
-  color: #f2ede3;
-  font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif;
-}
-body {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-#wrap {
-  position: relative;
-  width: 1280px;
-  max-width: 100vw;
-  aspect-ratio: 16 / 9;
-}
-#game {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: #1d3a2a;
-  cursor: crosshair;
-}
-.overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(8, 12, 20, 0.55);
-  text-align: center;
-  z-index: 5;
-}
-.overlay.hidden { display: none; }
-.panel {
-  max-width: 640px;
-  padding: 34px 40px 28px;
-  background: rgba(10, 14, 22, 0.88);
-  border: 1px solid rgba(255, 176, 66, 0.45);
-  border-radius: 10px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
-}
-.panel.small { max-width: 460px; }
-.kicker {
-  margin: 0 0 6px;
-  color: #ffb042;
-  font-size: 13px;
-  letter-spacing: 4px;
-  font-weight: bold;
-}
-h1 {
-  margin: 0 0 10px;
-  font-size: 54px;
-  line-height: 1;
-  letter-spacing: 3px;
-  color: #ff5a3c;
-  text-shadow: 0 3px 0 #7a1d0d, 0 6px 18px rgba(0, 0, 0, 0.7);
-}
-h1.red { color: #ff2e4d; text-shadow: 0 3px 0 #5c0a18, 0 6px 18px rgba(0, 0, 0, 0.7); }
-.tag { margin: 0 0 12px; font-size: 16px; color: #ffd9a0; }
-.story { margin: 0 0 18px; font-size: 15px; line-height: 1.55; color: #e8e2d4; }
-.buttons { display: flex; gap: 12px; justify-content: center; margin: 0 0 16px; }
-button {
-  font-family: inherit;
-  font-size: 17px;
-  font-weight: bold;
-  letter-spacing: 1px;
-  padding: 12px 26px;
-  border-radius: 6px;
-  border: 1px solid #ffb042;
-  background: #ff5a3c;
-  color: #fff7ee;
-  cursor: pointer;
-}
-button:hover { background: #ff6f52; }
-button:disabled { opacity: 0.45; cursor: default; }
-#btn-continue { background: #1f6f5c; border-color: #57c9a8; }
-#btn-continue:hover { background: #268a72; }
-.controls { margin: 0 0 10px; font-size: 13px; line-height: 1.6; color: #b9c0cc; }
-.fine { margin: 0; font-size: 12px; color: #7d8594; }
+html, body { margin: 0; padding: 0; height: 100%; background: #0b0e14; overflow: hidden; }
+body { font-family: "Trebuchet MS", Verdana, sans-serif; color: #f2ede2; }
+#wrap { position: fixed; inset: 0; }
+#game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: #1d2b1f; }
+.hidden { display: none !important; }
+
+#hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+#hud-top { position: absolute; top: 14px; left: 16px; right: 16px; display: flex; gap: 18px; align-items: center; }
+#health-box { display: flex; align-items: center; gap: 8px; }
+#health-label { font-size: 12px; letter-spacing: 2px; color: #ffd166; text-shadow: 0 1px 2px #000; }
+#health-bar { width: 170px; height: 14px; background: rgba(0, 0, 0, 0.55); border: 2px solid rgba(255, 255, 255, 0.75); border-radius: 3px; overflow: hidden; }
+#health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #37d67a, #9be15d); }
+#cash-box { font-size: 26px; font-weight: bold; color: #7dff9b; text-shadow: 0 2px 3px #000; letter-spacing: 1px; }
+#stars-box { font-size: 24px; letter-spacing: 2px; color: #ffd166; text-shadow: 0 0 6px rgba(255, 209, 102, 0.7), 0 2px 3px #000; }
+#clock-box { margin-left: auto; font-size: 20px; font-weight: bold; color: #fff; text-shadow: 0 2px 3px #000; background: rgba(0, 0, 0, 0.45); padding: 4px 12px; border-radius: 4px; }
+#mission-box { position: absolute; top: 56px; left: 16px; background: rgba(0, 0, 0, 0.55); border-left: 4px solid #ff9f1c; padding: 8px 14px; max-width: 460px; border-radius: 0 4px 4px 0; }
+#mission-title { display: block; font-size: 13px; letter-spacing: 3px; color: #ff9f1c; font-weight: bold; }
+#msg { font-size: 15px; line-height: 1.35; }
+#hud-bottom { position: absolute; bottom: 14px; left: 16px; right: 16px; display: flex; gap: 16px; align-items: center; }
+#weapon { font-size: 15px; font-weight: bold; letter-spacing: 2px; background: rgba(0, 0, 0, 0.55); padding: 6px 12px; border-radius: 4px; color: #ffd166; }
+#speed { font-size: 15px; font-weight: bold; background: rgba(0, 0, 0, 0.55); padding: 6px 12px; border-radius: 4px; }
+#hint { margin-left: auto; font-size: 12px; color: rgba(255, 255, 255, 0.8); text-shadow: 0 1px 2px #000; }
+
+.overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(5, 8, 12, 0.72); z-index: 10; }
+.panel { max-width: 620px; margin: 20px; padding: 30px 36px; text-align: center; background: linear-gradient(160deg, #1b2340, #3a1c4d 55%, #7a2e1d); border: 2px solid #ff9f1c; border-radius: 10px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.7); }
+.panel h1 { margin: 0 0 6px; font-size: 52px; letter-spacing: 4px; color: #ffd166; text-shadow: 0 3px 0 #7a2e1d, 0 6px 18px #000; }
+.panel h2 { margin: 0 0 8px; font-size: 44px; letter-spacing: 6px; color: #ff5d5d; text-shadow: 0 3px 0 #4d0f0f, 0 6px 18px #000; }
+.panel .tag { margin: 0 0 12px; font-size: 17px; font-style: italic; color: #ffe9b0; }
+.panel .story { font-size: 15px; line-height: 1.55; color: #f2ede2; }
+.panel .controls { font-size: 13px; line-height: 1.7; color: #d8d2c4; }
+.panel .fine { font-size: 11px; color: rgba(255, 255, 255, 0.55); }
+.btns { display: flex; gap: 14px; justify-content: center; margin: 18px 0 8px; }
+button { font-family: inherit; font-size: 17px; font-weight: bold; letter-spacing: 2px; color: #1a1206; background: linear-gradient(180deg, #ffd166, #ff9f1c); border: 0; border-radius: 6px; padding: 12px 26px; cursor: pointer; box-shadow: 0 4px 0 #a35c00, 0 8px 18px rgba(0, 0, 0, 0.5); }
+button:hover { filter: brightness(1.08); }
+button:active { transform: translateY(3px); box-shadow: 0 1px 0 #a35c00; }
+#btn-continue { background: linear-gradient(180deg, #bfe3ff, #5da9dd); box-shadow: 0 4px 0 #2c5a7a, 0 8px 18px rgba(0, 0, 0, 0.5); }

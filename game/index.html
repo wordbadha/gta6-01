@@ -10,33 +10,51 @@
 <div id="wrap">
   <canvas id="game" width="1280" height="720"></canvas>
 
+  <div id="hud" class="hidden">
+    <div id="hud-top">
+      <div id="health-box"><span id="health-label">HEALTH</span><div id="health-bar"><div id="health-fill"></div></div></div>
+      <div id="cash-box">$<span id="cash">250</span></div>
+      <div id="stars-box"><span id="stars"></span></div>
+      <div id="clock-box"><span id="clock">08:00</span></div>
+    </div>
+    <div id="mission-box"><span id="mission-title">PALMETTO HEAT</span><span id="msg"></span></div>
+    <div id="hud-bottom">
+      <span id="weapon">FISTS</span>
+      <span id="speed"></span>
+      <span id="hint">WASD move &middot; E enter car &middot; Space punch &middot; Click shoot &middot; 1/2 weapon &middot; T taxi &middot; P pause</span>
+    </div>
+  </div>
+
   <div id="menu" class="overlay">
     <div class="panel">
-      <p class="kicker">PALMETTO CITY &middot; EST. 2026</p>
       <h1>PALMETTO HEAT</h1>
-      <p class="tag">An original open-world crime story. No Rockstar, no Vice City — just sun, salt air, and trouble.</p>
-      <p class="story">Jax &ldquo;Reef&rdquo; Carter is back in Palmetto City. Lena &ldquo;Nova&rdquo; Diaz has six jobs for him, one city to run, and the Palmetto PD on every corner. Steal cars, dodge the heat, find the hidden packages, and make the score.</p>
-      <div class="buttons">
-        <button id="btn-new" type="button">New game</button>
-        <button id="btn-continue" type="button">Continue</button>
+      <p class="tag">Palmetto City is yours. Steal it, drive it, survive it.</p>
+      <p class="story">Jax &ldquo;Reef&rdquo; Carter is back in Palmetto City with one job from Lena &ldquo;Nova&rdquo; Diaz:
+      six scores, one hot streak, and the whole Palmetto PD on his tail. Steal cars, outrun the law,
+      find the hidden packages, and finish all six missions.</p>
+      <div class="btns">
+        <button id="btn-new" type="button">NEW GAME</button>
+        <button id="btn-continue" type="button">CONTINUE</button>
       </div>
-      <p class="controls">WASD / arrows — move &amp; drive &middot; Shift — run &middot; E — enter car / interact &middot; Space — punch &middot; Mouse — aim, click — shoot &middot; 1 / 2 — fists / pistol &middot; T — pick up a taxi fare &middot; M — music &middot; Esc / P — pause</p>
-      <p class="fine">A fully offline game. Your save lives in this browser only.</p>
+      <p class="controls">WASD / arrows &mdash; move &amp; drive &nbsp;&middot;&nbsp; Shift &mdash; run &nbsp;&middot;&nbsp; E &mdash; enter car / interact
+      &nbsp;&middot;&nbsp; Space &mdash; punch &nbsp;&middot;&nbsp; Mouse + click &mdash; aim &amp; shoot &nbsp;&middot;&nbsp; 1 / 2 &mdash; fists / pistol
+      &nbsp;&middot;&nbsp; T &mdash; taxi fare &nbsp;&middot;&nbsp; M &mdash; music &nbsp;&middot;&nbsp; P / Esc &mdash; pause</p>
+      <p class="fine">An original game. No real city, person or vehicle is depicted. Runs fully offline.</p>
     </div>
   </div>
 
   <div id="pause" class="overlay hidden">
-    <div class="panel small">
-      <h1>PAUSED</h1>
-      <p class="tag">Palmetto City waits for no one. Except right now.</p>
-      <p class="controls">Press Esc or P to keep playing.</p>
+    <div class="panel">
+      <h2>PAUSED</h2>
+      <p>Palmetto City waits for no one. Except now.</p>
+      <div class="btns"><button id="btn-resume" type="button">RESUME</button></div>
     </div>
   </div>
 
   <div id="wasted" class="overlay hidden">
-    <div class="panel small">
-      <h1 class="red">WASTED</h1>
-      <p class="tag">You wake up at Palmetto General Hospital…</p>
+    <div class="panel">
+      <h2>WASTED</h2>
+      <p>The PD dragged you to Palmetto General. You wake up patched, broke on pride, and ready to go again.</p>
     </div>
   </div>
 </div>
